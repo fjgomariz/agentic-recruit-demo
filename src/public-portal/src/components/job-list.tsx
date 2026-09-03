@@ -3,18 +3,18 @@
 import { useMemo, useState } from "react";
 import { JobCard } from "@/components/job-card";
 import { SearchIcon } from "@/components/icons";
-import type { Job } from "@/data/jobs";
+import type { Job } from "@domain";
 
 export function JobList({ jobs }: { jobs: Job[] }) {
   const [query, setQuery] = useState("");
   const [team, setTeam] = useState("All teams");
   const [workplace, setWorkplace] = useState("All workplaces");
 
-  const teams = ["All teams", ...Array.from(new Set(jobs.map((job) => job.team)))];
-  const workplaces = ["All workplaces", ...Array.from(new Set(jobs.map((job) => job.workplace)))];
+  const teams = ["All teams", ...Array.from(new Set(jobs.map((job) => job.department)))];
+  const workplaces = ["All workplaces", ...Array.from(new Set(jobs.map((job) => job.location.workplaceType)))];
   const filteredJobs = useMemo(() => jobs.filter((job) => {
-    const searchTarget = `${job.title} ${job.team} ${job.location} ${job.summary}`.toLowerCase();
-    return searchTarget.includes(query.toLowerCase()) && (team === "All teams" || job.team === team) && (workplace === "All workplaces" || job.workplace === workplace);
+    const searchTarget = `${job.title} ${job.department} ${job.location.displayName} ${job.summary}`.toLowerCase();
+    return searchTarget.includes(query.toLowerCase()) && (team === "All teams" || job.department === team) && (workplace === "All workplaces" || job.location.workplaceType === workplace);
   }), [jobs, query, team, workplace]);
 
   return (
