@@ -38,12 +38,7 @@ $principalId = az ad signed-in-user show --query id --output tsv
 az cosmosdb sql role assignment create --resource-group $resourceGroup --account-name $accountName --scope / --principal-id $principalId --role-definition-id 00000000-0000-0000-0000-000000000002
 ```
 
-If the Cosmos firewall does not already allow your network, add your current public IP:
-
-```powershell
-$publicIp = (Invoke-RestMethod -Uri "https://api.ipify.org").Trim()
-az cosmosdb update --resource-group $resourceGroup --name $accountName --public-network-access Enabled --ip-range-filter $publicIp
-```
+Cosmos DB public network access is disabled. Running the API locally against Azure therefore also requires network connectivity to the application VNet, such as an existing VPN. Do not temporarily enable the public endpoint for local development.
 
 The API uses `DefaultAzureCredential`. Locally this uses the signed-in Azure CLI identity; deployed workloads should use a managed identity with equivalent Cosmos DB data-plane permissions.
 
@@ -56,6 +51,8 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
+
+Alternatively, create `.env` from `.env.example` and run `uvicorn app.main:app --reload --env-file .env`.
 
 Open:
 

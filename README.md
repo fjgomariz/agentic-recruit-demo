@@ -32,6 +32,10 @@ The application is organized around two human experiences and a coordinated agen
 
 Human approval is a central architectural boundary. Agents can prepare recommendations and supporting evidence, while recruiters retain control over decisions and workflow progression.
 
+## Development and deployment
+
+Application-specific local setup is documented under each application folder. Continuous validation, GitHub OIDC setup, and the update-only development deployment process are documented in [docs/deployment.md](docs/deployment.md).
+
 ## Foundry Learning Objectives
 
 The demo is designed to explore the following Microsoft Foundry capabilities:

@@ -1,0 +1,96 @@
+name: Validate infrastructure
+
+on:
+  pull_request:
+    paths:
+      - "azure.yaml"
+      - "infra/**"
+      - ".github/workflows/validate-infra.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: validate-infra-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compile Bicep and validate azd
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Azure Developer CLI
+        uses: Azure/setup-azd@v2
+
+      - name: Install Bicep CLI
+        run: az bicep install
+
+      - name: Compile subscription template
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Compile development parameters
+        run: az bicep build-params --file infra/parameters/dev.bicepparam --stdout > /dev/null
+
+      - name: Validate azd project configuration
+        run: |
+          set -euo pipefail
+          output="$(azd show)"
+          echo "$output"
+          grep -q "recruitment-foundry-demo" <<< "$output"
+
+  breaking-changes:
+    name: Detect infrastructure deletions
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate OIDC configuration variables
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          for variable in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
+            if [[ -z "${!variable}" ]]; then
+              echo "::error::$variable must be configured in the dev GitHub environment."
+              exit 1
+            fi
+          done
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run subscription what-if
+        env:
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'swedencentral' }}
+        run: |
+          set -euo pipefail
+          az deployment sub what-if \
+            --name "validate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --location "$AZURE_LOCATION" \
+            --parameters infra/parameters/dev.bicepparam location="$AZURE_LOCATION" environmentName=dev \
+            --no-pretty-print \
+            --output json > what-if.json
+
+          deleted_resources="$(jq '[.changes[]? | select(.changeType == "Delete")] | length' what-if.json)"
+          if [[ "$deleted_resources" -gt 0 ]]; then
+            echo "::error::Bicep what-if contains resource deletions. Review the deployment before merging."
+            jq -r '.changes[] | select(.changeType == "Delete") | "DELETE \(.resourceId)"' what-if.json
+            exit 1
+          fi
+
+          jq -r '.changes[]? | select(.changeType != "NoChange" and .changeType != "Ignore") | "\(.changeType) \(.resourceId)"' what-if.json

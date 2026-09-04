@@ -1,0 +1,107 @@
+name: Validate applications
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - ".dockerignore"
+      - ".github/workflows/validate-apps.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portals:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Public Portal
+            directory: src/public-portal
+          - name: Recruiter Portal
+            directory: src/recruiter-portal
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.directory }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: ${{ matrix.directory }}
+        run: npm run lint
+
+      - name: Build
+        working-directory: ${{ matrix.directory }}
+        run: npm run build
+
+  api:
+    name: Test and build API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/api/pyproject.toml
+
+      - name: Install build and test dependencies
+        run: python -m pip install --upgrade build ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+  containers:
+    name: Build container ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Public Portal
+            dockerfile: src/public-portal/Dockerfile
+          - name: Recruiter Portal
+            dockerfile: src/recruiter-portal/Dockerfile
+          - name: API
+            dockerfile: src/api/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

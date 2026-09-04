@@ -1,0 +1,16 @@
+.git
+.github
+.azure
+.vscode
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+**/.next
+**/.venv
+**/__pycache__
+**/node_modules
+**/*.pyc
+**/.pytest_cache
+docs
+infra
