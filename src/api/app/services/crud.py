@@ -54,3 +54,10 @@ class CrudService(Generic[Entity]):
         if updated is None:
             raise EntityNotFoundError(f"{self._resource_name} '{entity_id}' was not found")
         return updated
+
+    async def delete(self, entity_id: str) -> None:
+        """Delete an entity or raise a domain-friendly error."""
+
+        deleted = await self._repository.delete(entity_id)
+        if not deleted:
+            raise EntityNotFoundError(f"{self._resource_name} '{entity_id}' was not found")

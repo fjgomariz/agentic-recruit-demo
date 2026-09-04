@@ -1,12 +1,22 @@
 import type { Job } from "@domain";
-import { publicJobs } from "@mocks";
 
-/** Candidate-visible jobs sourced from the shared canonical mock records. */
-export const jobs: Job[] = publicJobs;
+const apiBaseUrl = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
-/** Finds a candidate-visible job by its stable identifier. */
-export function getJob(id: string): Job | undefined {
-  return jobs.find((job) => job.id === id);
+/** Retrieves published jobs from the backend API. */
+export async function getJobs(): Promise<Job[]> {
+  const response = await fetch(`${apiBaseUrl}/jobs`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Failed to retrieve jobs: ${response.status}`);
+  const jobs = (await response.json()) as Job[];
+  return jobs.filter((job) => job.status === "Published");
+}
+
+/** Retrieves one published job from the backend API. */
+export async function getJob(id: string): Promise<Job | undefined> {
+  const response = await fetch(`${apiBaseUrl}/jobs/${encodeURIComponent(id)}`, { cache: "no-store" });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw new Error(`Failed to retrieve Job '${id}': ${response.status}`);
+  const job = (await response.json()) as Job;
+  return job.status === "Published" ? job : undefined;
 }
 
 /** Formats a publication timestamp for compact candidate-facing display. */

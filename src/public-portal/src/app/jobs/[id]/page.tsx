@@ -2,19 +2,17 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRightIcon, BriefcaseIcon, CheckIcon, ClockIcon, LocationIcon } from "@/components/icons";
-import { getJob, jobs } from "@/data/jobs";
+import { getJob } from "@/data/jobs";
 
 type JobPageProps = { params: Promise<{ id: string }> };
 
-export function generateStaticParams() { return jobs.map((job) => ({ id: job.id })); }
-
 export async function generateMetadata({ params }: JobPageProps): Promise<Metadata> {
-  const job = getJob((await params).id);
+  const job = await getJob((await params).id);
   return { title: job ? `${job.title} | Northstar` : "Role not found | Northstar", description: job?.summary };
 }
 
 export default async function JobDetailsPage({ params }: JobPageProps) {
-  const job = getJob((await params).id);
+  const job = await getJob((await params).id);
   if (!job) notFound();
 
   return <main>

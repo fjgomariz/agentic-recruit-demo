@@ -6,31 +6,8 @@ import type {
   CandidateEvaluation,
   EvaluationReport,
   EvaluationScore,
-  Job,
   Resume,
 } from "../domain";
-
-/** Creates a complete mock job with optional field overrides. */
-export function createMockJob(overrides: Partial<Job> = {}): Job {
-  return {
-    id: "sample-job",
-    title: "Sample Role",
-    department: "Product",
-    location: { displayName: "Remote — US", workplaceType: "Remote", countryCode: "US" },
-    status: "Draft",
-    employmentType: "Full-time",
-    experienceLevel: "Mid",
-    summary: "Help build thoughtful products for meaningful work.",
-    description: "Collaborate with a multidisciplinary team to deliver clear customer outcomes.",
-    responsibilities: ["Own well-defined outcomes from discovery through delivery."],
-    qualifications: ["Relevant practical experience and strong collaboration skills."],
-    preferredQualifications: [],
-    hiringManager: "Jordan Lee",
-    createdAt: "2026-09-01T09:00:00Z",
-    applicantCount: 0,
-    ...overrides,
-  };
-}
 
 /** Creates a complete mock candidate with optional field overrides. */
 export function createMockCandidate(overrides: Partial<Candidate> = {}): Candidate {

@@ -1,0 +1,7 @@
+name: recruitment-foundry-demo
+metadata:
+  template: recruitment-foundry-demo@0.1.0
+infra:
+  provider: bicep
+  path: infra
+  module: main

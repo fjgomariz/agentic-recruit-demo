@@ -1,16 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { candidateDetails, jobs } from "@/data/mock-data";
+import { candidateDetails } from "@/data/mock-data";
+import { getJob } from "@/data/jobs";
 import { Score, StatusBadge } from "@/components/ui";
-
-export function generateStaticParams() { return candidateDetails.map(({ candidate }) => ({ id: candidate.id })); }
 
 export default async function CandidateDetails({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const details = candidateDetails.find(({ candidate }) => candidate.id === id);
   if (!details) notFound();
   const { candidate, application, resume, evaluation, report } = details;
-  const job = jobs.find((item) => item.id === application.jobId);
+  const job = await getJob(application.jobId);
   const name = `${candidate.firstName} ${candidate.lastName}`;
 
   return <>

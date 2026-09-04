@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { jobs } from "@/data/mock-data";
+import { getJob } from "@/data/jobs";
 import { StatusBadge } from "@/components/ui";
-
-export function generateStaticParams() { return jobs.map(({ id }) => ({ id })); }
 
 export default async function JobDetails({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const job = jobs.find((item) => item.id === id);
+  const job = await getJob(id);
   if (!job) notFound();
 
   return <>

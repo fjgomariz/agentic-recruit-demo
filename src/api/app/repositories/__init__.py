@@ -1,5 +1,6 @@
-"""Repository abstractions and in-memory implementations."""
+"""Repository implementations."""
 
+from .cosmos import CosmosJobRepository
 from .memory import InMemoryRepository
 
-__all__ = ["InMemoryRepository"]
+__all__ = ["CosmosJobRepository", "InMemoryRepository"]

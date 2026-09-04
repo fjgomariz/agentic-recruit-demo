@@ -1,23 +1,53 @@
 # Recruitment Foundry Demo API
 
-FastAPI foundation for jobs, candidates, and candidate evaluations. Data is held in memory and resets whenever the process restarts.
+FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persisted in Azure Cosmos DB for NoSQL. Candidates and evaluations remain in memory and reset whenever the process restarts.
 
 ## Architecture
 
 - `app/api`: HTTP routers and error translation.
 - `app/domain`: Pydantic v2 models matching `src/shared/domain`.
 - `app/services`: application-level CRUD behavior.
-- `app/repositories`: persistence contracts, in-memory storage, and shared mock seed records.
+- `app/repositories`: persistence contracts, Cosmos DB Job storage, in-memory storage, and shared demo seed records.
 - `app/models`: transport models that are not domain entities.
 - `app/dependencies`: FastAPI dependency providers that compose repositories and services.
 - `app/main.py`: application metadata and router registration.
 - `tests`: focused endpoint behavior checks.
 
-The API depends inward from routes to services to repository contracts. The in-memory repository can later be replaced without changing route behavior. This phase intentionally contains no Cosmos DB, Blob Storage, Azure authentication, or AI service integration.
+The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repository for jobs and in-memory repositories for candidates and evaluations. On startup, the API creates the configured `recruitment` database and id-partitioned `jobs` container when they are missing. A new empty jobs container is populated with the demo seed jobs.
 
 ## Start locally
 
-Install Python 3.12, then run from this directory:
+Install Python 3.12, Azure CLI, and Azure Developer CLI. Provision the Azure foundation from the repository root if needed:
+
+```powershell
+azd auth login
+azd env new dev
+azd env set AZURE_LOCATION eastus2
+azd provision
+```
+
+For local demo development, load the Cosmos endpoint from the selected `azd` environment and grant the signed-in developer Cosmos DB data-plane access:
+
+```powershell
+$env:AZURE_COSMOS_ENDPOINT = azd env get-value AZURE_COSMOS_ENDPOINT
+$env:AZURE_COSMOS_DATABASE_NAME = "recruitment"
+$env:AZURE_COSMOS_JOBS_CONTAINER_NAME = "jobs"
+$resourceGroup = azd env get-value AZURE_RESOURCE_GROUP
+$accountName = azd env get-value AZURE_COSMOS_ACCOUNT_NAME
+$principalId = az ad signed-in-user show --query id --output tsv
+az cosmosdb sql role assignment create --resource-group $resourceGroup --account-name $accountName --scope / --principal-id $principalId --role-definition-id 00000000-0000-0000-0000-000000000002
+```
+
+If the Cosmos firewall does not already allow your network, add your current public IP:
+
+```powershell
+$publicIp = (Invoke-RestMethod -Uri "https://api.ipify.org").Trim()
+az cosmosdb update --resource-group $resourceGroup --name $accountName --public-network-access Enabled --ip-range-filter $publicIp
+```
+
+The API uses `DefaultAzureCredential`. Locally this uses the signed-in Azure CLI identity; deployed workloads should use a managed identity with equivalent Cosmos DB data-plane permissions.
+
+From `src/api`, create the environment and start the API:
 
 ```powershell
 py -3.12 -m venv .venv
@@ -48,4 +78,13 @@ Each resource supports collection retrieval, retrieval by ID, creation, and full
 - `/candidates`
 - `/evaluations`
 
-POST returns `409` for a duplicate ID. PUT returns `400` when route and body IDs differ and `404` when the target does not exist.
+Jobs also support `DELETE /jobs/{job_id}`, which returns `204` when deleted and `404` when the job does not exist. POST returns `409` for a duplicate ID. PUT returns `400` when route and body IDs differ and `404` when the target does not exist.
+
+## Cosmos DB environment variables
+
+| Variable | Required | Default |
+| --- | --- | --- |
+| `AZURE_COSMOS_ENDPOINT` | Yes | None |
+| `AZURE_COSMOS_KEY` | No | `DefaultAzureCredential`; account keys may be disabled |
+| `AZURE_COSMOS_DATABASE_NAME` | No | `recruitment` |
+| `AZURE_COSMOS_JOBS_CONTAINER_NAME` | No | `jobs` |

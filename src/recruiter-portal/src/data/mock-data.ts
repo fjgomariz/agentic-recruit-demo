@@ -7,11 +7,8 @@ import {
   mockCandidates,
   mockEvaluationReports,
   mockResumes,
-  recruiterJobs,
 } from "@mocks";
 
-/** Recruiter-visible canonical mock jobs. */
-export const jobs = recruiterJobs;
 /** Canonical mock candidate identities. */
 export const candidates = mockCandidates;
 /** Canonical mock application records. */

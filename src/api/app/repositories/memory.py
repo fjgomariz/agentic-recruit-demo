@@ -39,3 +39,8 @@ class InMemoryRepository(Generic[Entity]):
             return None
         self._items[entity.id] = entity.model_copy(deep=True)
         return entity.model_copy(deep=True)
+
+    async def delete(self, entity_id: str) -> bool:
+        """Delete an entity and report whether it existed."""
+
+        return self._items.pop(entity_id, None) is not None

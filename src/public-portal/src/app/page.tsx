@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { ArrowRightIcon, GrowthIcon, PeopleIcon, SparkIcon } from "@/components/icons";
 import { JobCard } from "@/components/job-card";
-import { jobs } from "@/data/jobs";
+import { getJobs } from "@/data/jobs";
 
-export default function Home() {
+export default async function Home() {
+  const jobs = await getJobs();
   return (
     <main>
       <section className="home-hero">

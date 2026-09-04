@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { jobs } from "@/data/mock-data";
 import { StatusBadge } from "@/components/ui";
+import { getJobs } from "@/data/jobs";
 
-export default function JobsPage() {
+export default async function JobsPage() {
+  const jobs = await getJobs();
   return (
     <>
       <div className="mb-8 flex items-end justify-between">

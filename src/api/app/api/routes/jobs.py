@@ -1,6 +1,6 @@
 """Job REST endpoints."""
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Response, status
 
 from app.api.errors import execute
 from app.dependencies.services import JobService
@@ -27,3 +27,9 @@ async def create_job(job: Job, service: JobService) -> Job:
 @router.put("/{job_id}", response_model=Job, summary="Update a job")
 async def update_job(job_id: str, job: Job, service: JobService) -> Job:
     return await execute(lambda: service.update(job_id, job))
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a job")
+async def delete_job(job_id: str, service: JobService) -> Response:
+    await execute(lambda: service.delete(job_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { agentExecutions, candidateDetails, jobs } from "@/data/mock-data";
+import { agentExecutions, candidateDetails } from "@/data/mock-data";
+import { getJobs } from "@/data/jobs";
 import { Score, StatusBadge } from "@/components/ui";
 
 const metrics = [["Open positions", "12", "+2 this month"], ["Candidates processed", "184", "+18% this month"], ["AI evaluations completed", "163", "94% completion"], ["AI spend this month", "$428.16", "12% below plan"]];
 
-export default function Dashboard() {
+export default async function Dashboard() {
+  const jobs = await getJobs();
   return <>
     <div className="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-medium text-cyan-700">Thursday, September 3</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Good afternoon, Jordan.</h1><p className="mt-2 text-slate-500">Here&apos;s what needs your attention across recruiting.</p></div><Link href="/jobs" className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700">+ Create job</Link></div>
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(([label, value, detail]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p><p className="mt-2 text-xs font-medium text-emerald-600">{detail}</p></div>)}</section>
