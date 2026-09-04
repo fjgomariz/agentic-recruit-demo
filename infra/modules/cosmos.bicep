@@ -26,6 +26,7 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2026-03-15' = {
       defaultConsistencyLevel: 'Session'
     }
     databaseAccountOfferType: 'Standard'
+    disableLocalAuth: true
     locations: [
       {
         failoverPriority: 0
@@ -34,7 +35,7 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2026-03-15' = {
       }
     ]
     minimalTlsVersion: 'Tls12'
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
   }
 }
 
@@ -53,3 +54,4 @@ output accountName string = account.name
 output accountId string = account.id
 output databaseName string = database.name
 output endpoint string = account.properties.documentEndpoint
+output endpointHostname string = '${account.name}.documents.azure.com'
