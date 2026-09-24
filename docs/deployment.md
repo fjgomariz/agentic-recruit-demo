@@ -44,9 +44,9 @@ The workflows publish to GHCR with the repository-scoped `GITHUB_TOKEN`. Make th
 
 ## Existing-resource prerequisite
 
-The current Bicep foundation does not define application Container Apps or a container registry. To preserve the requirement that this change introduce no Azure resources, deployment is update-only. Before enabling continuous deployment, the three named Container Apps must already exist in the provisioned `cae-recruitment-dev` environment with external ingress enabled. The portals must use target port `3000`; the API must use target port `8000`.
+The current Bicep foundation does not define application Container Apps or a container registry. To preserve the requirement that this change introduce no Azure resources, deployment is update-only. Before enabling continuous deployment, the three named Container Apps must already exist in the provisioned `cae-recruitment-dev` environment with external ingress enabled. Deployment configures portal ingress target ports to `3000` and API ingress target port to `8000`.
 
-The API Container App must have a system-assigned managed identity. Grant it the narrowly scoped Cosmos DB for NoSQL data-plane role required to create/read the `jobs` container and manage items. The workflow verifies the identity exists but does not create identities or role assignments.
+The API Container App must have a system-assigned managed identity. The workflow grants that identity the Cosmos DB Built-in Data Contributor role at the account root scope, which lets the API create/read the `jobs` container and manage its items.
 
 If a target app is absent, attached to another environment, lacks external ingress, or the API lacks managed identity, deployment stops before changing an app.
 
