@@ -32,6 +32,7 @@ jobs:
     outputs:
       resource-group: ${{ steps.outputs.outputs.resource-group }}
       cosmos-endpoint: ${{ steps.outputs.outputs.cosmos-endpoint }}
+      cosmos-account: ${{ steps.outputs.outputs.cosmos-account }}
       cosmos-database: ${{ steps.outputs.outputs.cosmos-database }}
       container-apps-environment-id: ${{ steps.outputs.outputs.container-apps-environment-id }}
     steps:
@@ -74,6 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "resource-group=$(azd env get-value AZURE_RESOURCE_GROUP)" >> "$GITHUB_OUTPUT"
+          echo "cosmos-account=$(azd env get-value AZURE_COSMOS_ACCOUNT_NAME)" >> "$GITHUB_OUTPUT"
           echo "cosmos-endpoint=$(azd env get-value AZURE_COSMOS_ENDPOINT)" >> "$GITHUB_OUTPUT"
           echo "cosmos-database=$(azd env get-value AZURE_COSMOS_DATABASE_NAME)" >> "$GITHUB_OUTPUT"
           echo "container-apps-environment-id=$(azd env get-value AZURE_CONTAINER_APPS_ENVIRONMENT_ID)" >> "$GITHUB_OUTPUT"
@@ -138,11 +140,14 @@ jobs:
     env:
       RESOURCE_GROUP: ${{ needs.provision.outputs.resource-group }}
       CONTAINER_APPS_ENVIRONMENT_ID: ${{ needs.provision.outputs.container-apps-environment-id }}
+      COSMOS_ACCOUNT: ${{ needs.provision.outputs.cosmos-account }}
       COSMOS_ENDPOINT: ${{ needs.provision.outputs.cosmos-endpoint }}
       COSMOS_DATABASE: ${{ needs.provision.outputs.cosmos-database }}
       PUBLIC_PORTAL_APP: ${{ vars.PUBLIC_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-public-dev' }}
       RECRUITER_PORTAL_APP: ${{ vars.RECRUITER_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-recruiter-dev' }}
       API_APP: ${{ vars.API_CONTAINER_APP_NAME || 'ca-recruitment-api-dev' }}
+      PORTAL_TARGET_PORT: 3000
+      API_TARGET_PORT: 8000
     steps:
       - name: Sign in to Azure with OIDC
         uses: azure/login@v2
@@ -175,11 +180,10 @@ jobs:
           done
 
       - name: Verify update-only deployment targets
+        id: targets
         run: |
           set -euo pipefail
-          for app_spec in "$PUBLIC_PORTAL_APP:3000" "$RECRUITER_PORTAL_APP:3000" "$API_APP:8000"; do
-            app="${app_spec%:*}"
-            expected_port="${app_spec##*:}"
+          for app in "$PUBLIC_PORTAL_APP" "$RECRUITER_PORTAL_APP" "$API_APP"; do
             if ! app_json="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$app" --output json 2>/dev/null)"; then
               echo "::error::Container App '$app' does not exist. This workflow is update-only and will not create Azure resources."
               exit 1
@@ -187,7 +191,6 @@ jobs:
 
             environment_id="$(jq -r '.properties.managedEnvironmentId' <<< "$app_json")"
             external_ingress="$(jq -r '.properties.configuration.ingress.external' <<< "$app_json")"
-            target_port="$(jq -r '.properties.configuration.ingress.targetPort' <<< "$app_json")"
             if [[ "${environment_id,,}" != "${CONTAINER_APPS_ENVIRONMENT_ID,,}" ]]; then
               echo "::error::Container App '$app' is not attached to the expected Container Apps Environment."
               exit 1
@@ -196,16 +199,50 @@ jobs:
               echo "::error::Container App '$app' must have external ingress enabled."
               exit 1
             fi
-            if [[ "$target_port" != "$expected_port" ]]; then
-              echo "::error::Container App '$app' must use ingress target port $expected_port; found $target_port."
-              exit 1
-            fi
           done
 
           api_principal_id="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$API_APP" --query identity.principalId --output tsv)"
-          if [[ -z "$api_principal_id" ]]; then
+          if [[ -z "$api_principal_id" || "$api_principal_id" == "null" || "$api_principal_id" == "None" ]]; then
             echo "::error::The API Container App requires a system-assigned managed identity for Cosmos DB access."
             exit 1
+          fi
+          echo "api_principal_id=$api_principal_id" >> "$GITHUB_OUTPUT"
+
+      - name: Configure ingress target ports
+        run: |
+          set -euo pipefail
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$API_APP" --target-port "$API_TARGET_PORT" --output none
+
+      - name: Grant API access to Cosmos DB
+        env:
+          API_PRINCIPAL_ID: ${{ steps.targets.outputs.api_principal_id }}
+        run: |
+          set -euo pipefail
+          cosmos_data_contributor_role="00000000-0000-0000-0000-000000000002"
+          cosmos_account_id="$(az cosmosdb show --name "$COSMOS_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query id --output tsv)"
+          assignments="$(az cosmosdb sql role assignment list \
+            --account-name "$COSMOS_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json)"
+          assignment_count="$(jq \
+            --arg principal_id "$API_PRINCIPAL_ID" \
+            --arg role_id "$cosmos_data_contributor_role" \
+            --arg account_id "$cosmos_account_id" \
+            '[.[] | select(
+              (.principalId | ascii_downcase) == ($principal_id | ascii_downcase) and
+              (.roleDefinitionId | ascii_downcase | endswith($role_id | ascii_downcase)) and
+              (.scope | rtrimstr("/") | ascii_downcase) == ($account_id | rtrimstr("/") | ascii_downcase)
+            )] | length' <<< "$assignments")"
+          if [[ "$assignment_count" == "0" ]]; then
+            az cosmosdb sql role assignment create \
+              --account-name "$COSMOS_ACCOUNT" \
+              --resource-group "$RESOURCE_GROUP" \
+              --scope "/" \
+              --principal-id "$API_PRINCIPAL_ID" \
+              --role-definition-id "$cosmos_data_contributor_role" \
+              --output none
           fi
 
       - name: Deploy API image and configuration
