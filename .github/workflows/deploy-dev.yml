@@ -204,11 +204,22 @@ jobs:
             exit 1
           fi
 
+      - name: Configure ingress target ports
+        run: |
+          set -euo pipefail
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --target-port 3000 --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --target-port 3000 --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$API_APP" --target-port 8000 --output none
+
       - name: Grant API access to Cosmos DB
         run: |
           set -euo pipefail
           cosmos_data_contributor_role="00000000-0000-0000-0000-000000000002"
           api_principal_id="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$API_APP" --query identity.principalId --output tsv)"
+          if [[ -z "$api_principal_id" ]]; then
+            echo "::error::The API Container App requires a system-assigned managed identity for Cosmos DB access."
+            exit 1
+          fi
           assignment_count="$(az cosmosdb sql role assignment list \
             --account-name "$COSMOS_ACCOUNT" \
             --resource-group "$RESOURCE_GROUP" \
@@ -233,7 +244,6 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --name "$API_APP" \
             --image "$API_IMAGE" \
-            --target-port 8000 \
             --set-env-vars \
               AZURE_COSMOS_ENDPOINT="$COSMOS_ENDPOINT" \
               AZURE_COSMOS_DATABASE_NAME="$COSMOS_DATABASE" \
@@ -258,8 +268,8 @@ jobs:
           RECRUITER_IMAGE: ${{ steps.images.outputs.recruiter }}
         run: |
           set -euo pipefail
-          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --image "$PUBLIC_IMAGE" --target-port 3000 --set-env-vars API_BASE_URL="$API_URL" --output none
-          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --image "$RECRUITER_IMAGE" --target-port 3000 --set-env-vars API_BASE_URL="$API_URL" --output none
+          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --image "$PUBLIC_IMAGE" --set-env-vars API_BASE_URL="$API_URL" --output none
+          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --image "$RECRUITER_IMAGE" --set-env-vars API_BASE_URL="$API_URL" --output none
 
       - name: Verify deployed endpoints
         env:
