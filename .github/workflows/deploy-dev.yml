@@ -146,6 +146,8 @@ jobs:
       PUBLIC_PORTAL_APP: ${{ vars.PUBLIC_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-public-dev' }}
       RECRUITER_PORTAL_APP: ${{ vars.RECRUITER_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-recruiter-dev' }}
       API_APP: ${{ vars.API_CONTAINER_APP_NAME || 'ca-recruitment-api-dev' }}
+      PORTAL_TARGET_PORT: 3000
+      API_TARGET_PORT: 8000
     steps:
       - name: Sign in to Azure with OIDC
         uses: azure/login@v2
@@ -178,6 +180,7 @@ jobs:
           done
 
       - name: Verify update-only deployment targets
+        id: targets
         run: |
           set -euo pipefail
           for app in "$PUBLIC_PORTAL_APP" "$RECRUITER_PORTAL_APP" "$API_APP"; do
@@ -203,34 +206,32 @@ jobs:
             echo "::error::The API Container App requires a system-assigned managed identity for Cosmos DB access."
             exit 1
           fi
+          echo "api_principal_id=$api_principal_id" >> "$GITHUB_OUTPUT"
 
       - name: Configure ingress target ports
         run: |
           set -euo pipefail
-          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --target-port 3000 --output none
-          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --target-port 3000 --output none
-          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$API_APP" --target-port 8000 --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$API_APP" --target-port "$API_TARGET_PORT" --output none
 
       - name: Grant API access to Cosmos DB
+        env:
+          API_PRINCIPAL_ID: ${{ steps.targets.outputs.api_principal_id }}
         run: |
           set -euo pipefail
           cosmos_data_contributor_role="00000000-0000-0000-0000-000000000002"
-          api_principal_id="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$API_APP" --query identity.principalId --output tsv)"
-          if [[ -z "$api_principal_id" ]]; then
-            echo "::error::The API Container App requires a system-assigned managed identity for Cosmos DB access."
-            exit 1
-          fi
           assignment_count="$(az cosmosdb sql role assignment list \
             --account-name "$COSMOS_ACCOUNT" \
             --resource-group "$RESOURCE_GROUP" \
-            --query "[?principalId=='$api_principal_id' && contains(roleDefinitionId, '$cosmos_data_contributor_role')] | length(@)" \
+            --query "[?principalId=='$API_PRINCIPAL_ID' && contains(roleDefinitionId, '$cosmos_data_contributor_role')] | length(@)" \
             --output tsv)"
-          if [[ "$assignment_count" == "0" ]]; then
+          if [[ "${assignment_count:-0}" == "0" ]]; then
             az cosmosdb sql role assignment create \
               --account-name "$COSMOS_ACCOUNT" \
               --resource-group "$RESOURCE_GROUP" \
               --scope "/" \
-              --principal-id "$api_principal_id" \
+              --principal-id "$API_PRINCIPAL_ID" \
               --role-definition-id "$cosmos_data_contributor_role" \
               --output none
           fi
