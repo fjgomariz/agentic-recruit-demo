@@ -230,10 +230,11 @@ jobs:
           assignment_count="$(jq \
             --arg principal_id "$API_PRINCIPAL_ID" \
             --arg role_id "$cosmos_data_contributor_role" \
+            --arg scope_suffix "/databaseAccounts/$COSMOS_ACCOUNT" \
             '[.[] | select(
               (.principalId | ascii_downcase) == ($principal_id | ascii_downcase) and
               (.roleDefinitionId | ascii_downcase | endswith($role_id | ascii_downcase)) and
-              .scope == "/"
+              (.scope | ascii_downcase | endswith($scope_suffix | ascii_downcase))
             )] | length' <<< "$assignments")"
           if [[ "$assignment_count" == "0" ]]; then
             az cosmosdb sql role assignment create \
