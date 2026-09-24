@@ -211,11 +211,9 @@ jobs:
       - name: Configure ingress target ports
         run: |
           set -euo pipefail
-          for app_spec in "$PUBLIC_PORTAL_APP:$PORTAL_TARGET_PORT" "$RECRUITER_PORTAL_APP:$PORTAL_TARGET_PORT" "$API_APP:$API_TARGET_PORT"; do
-            app="${app_spec%:*}"
-            target_port="${app_spec##*:}"
-            az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$app" --target-port "$target_port" --output none
-          done
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
+          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$API_APP" --target-port "$API_TARGET_PORT" --output none
 
       - name: Grant API access to Cosmos DB
         env:
@@ -223,6 +221,7 @@ jobs:
         run: |
           set -euo pipefail
           cosmos_data_contributor_role="00000000-0000-0000-0000-000000000002"
+          cosmos_account_id="$(az cosmosdb show --name "$COSMOS_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query id --output tsv)"
           assignments="$(az cosmosdb sql role assignment list \
             --account-name "$COSMOS_ACCOUNT" \
             --resource-group "$RESOURCE_GROUP" \
@@ -230,11 +229,11 @@ jobs:
           assignment_count="$(jq \
             --arg principal_id "$API_PRINCIPAL_ID" \
             --arg role_id "$cosmos_data_contributor_role" \
-            --arg scope_suffix "/databaseAccounts/$COSMOS_ACCOUNT" \
+            --arg account_id "$cosmos_account_id" \
             '[.[] | select(
               (.principalId | ascii_downcase) == ($principal_id | ascii_downcase) and
               (.roleDefinitionId | ascii_downcase | endswith($role_id | ascii_downcase)) and
-              (.scope | ascii_downcase | endswith($scope_suffix | ascii_downcase))
+              (.scope | ascii_downcase) == ($account_id | ascii_downcase)
             )] | length' <<< "$assignments")"
           if [[ "$assignment_count" == "0" ]]; then
             az cosmosdb sql role assignment create \
