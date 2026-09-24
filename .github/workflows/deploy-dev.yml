@@ -16,95 +16,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate-infrastructure:
-    uses: ./.github/workflows/validate-infra.yml
-
-  validate-applications:
-    uses: ./.github/workflows/validate-apps.yml
-
-  provision:
-    name: Provision existing foundation
-    needs:
-      - validate-infrastructure
-      - validate-applications
+  deploy:
+    name: Deploy demo
     runs-on: ubuntu-latest
     environment: dev
-    outputs:
-      resource-group: ${{ steps.outputs.outputs.resource-group }}
-      cosmos-endpoint: ${{ steps.outputs.outputs.cosmos-endpoint }}
-      cosmos-account: ${{ steps.outputs.outputs.cosmos-account }}
-      cosmos-database: ${{ steps.outputs.outputs.cosmos-database }}
-      container-apps-environment-id: ${{ steps.outputs.outputs.container-apps-environment-id }}
+    env:
+      AZURE_ENV_NAME: dev
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'swedencentral' }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      PUBLIC_PORTAL_APP: ${{ vars.PUBLIC_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-public-dev' }}
+      RECRUITER_PORTAL_APP: ${{ vars.RECRUITER_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-recruiter-dev' }}
+      API_APP: ${{ vars.API_CONTAINER_APP_NAME || 'ca-recruitment-api-dev' }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Azure Developer CLI
-        uses: Azure/setup-azd@v2
-
-      - name: Sign in to Azure with OIDC
+      - name: Sign in to Azure
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign azd in with OIDC
+      - name: Install Azure Developer CLI
+        uses: Azure/setup-azd@v2
+
+      - name: Run azd provision
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-        run: azd auth login --client-id "$AZURE_CLIENT_ID" --tenant-id "$AZURE_TENANT_ID" --federated-credential-provider github
-
-      - name: Configure azd environment
-        env:
-          AZURE_ENV_NAME: dev
-          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'swedencentral' }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
         run: |
-          set -euo pipefail
+          azd auth login \
+            --client-id "$AZURE_CLIENT_ID" \
+            --tenant-id "$AZURE_TENANT_ID" \
+            --federated-credential-provider github
           azd env new "$AZURE_ENV_NAME" --no-prompt
           azd env config set infra.parameters.environmentName "$AZURE_ENV_NAME"
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
-
-      - name: Provision infrastructure
-        run: azd provision --no-prompt
-
-      - name: Export safe deployment outputs
-        id: outputs
-        run: |
-          set -euo pipefail
-          echo "resource-group=$(azd env get-value AZURE_RESOURCE_GROUP)" >> "$GITHUB_OUTPUT"
-          echo "cosmos-account=$(azd env get-value AZURE_COSMOS_ACCOUNT_NAME)" >> "$GITHUB_OUTPUT"
-          echo "cosmos-endpoint=$(azd env get-value AZURE_COSMOS_ENDPOINT)" >> "$GITHUB_OUTPUT"
-          echo "cosmos-database=$(azd env get-value AZURE_COSMOS_DATABASE_NAME)" >> "$GITHUB_OUTPUT"
-          echo "container-apps-environment-id=$(azd env get-value AZURE_CONTAINER_APPS_ENVIRONMENT_ID)" >> "$GITHUB_OUTPUT"
-
-  publish-images:
-    name: Publish ${{ matrix.name }} image
-    needs:
-      - validate-infrastructure
-      - validate-applications
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - name: Public Portal
-            package: recruitment-foundry-public-portal
-            dockerfile: src/public-portal/Dockerfile
-          - name: Recruiter Portal
-            package: recruitment-foundry-recruiter-portal
-            dockerfile: src/recruiter-portal/Dockerfile
-          - name: API
-            package: recruitment-foundry-api
-            dockerfile: src/api/Dockerfile
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          azd provision --no-prompt
 
       - name: Sign in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -113,181 +64,61 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve lowercase image name
-        id: image
+      - name: Build and publish images
         run: |
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
-          echo "name=ghcr.io/${owner}/${{ matrix.package }}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          image_prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
 
-      - name: Build and publish immutable image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.image.outputs.name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy:
-    name: Update existing Container Apps
-    needs:
-      - provision
-      - publish-images
-    runs-on: ubuntu-latest
-    environment:
-      name: dev
-    env:
-      RESOURCE_GROUP: ${{ needs.provision.outputs.resource-group }}
-      CONTAINER_APPS_ENVIRONMENT_ID: ${{ needs.provision.outputs.container-apps-environment-id }}
-      COSMOS_ACCOUNT: ${{ needs.provision.outputs.cosmos-account }}
-      COSMOS_ENDPOINT: ${{ needs.provision.outputs.cosmos-endpoint }}
-      COSMOS_DATABASE: ${{ needs.provision.outputs.cosmos-database }}
-      PUBLIC_PORTAL_APP: ${{ vars.PUBLIC_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-public-dev' }}
-      RECRUITER_PORTAL_APP: ${{ vars.RECRUITER_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-recruiter-dev' }}
-      API_APP: ${{ vars.API_CONTAINER_APP_NAME || 'ca-recruitment-api-dev' }}
-      PORTAL_TARGET_PORT: 3000
-      API_TARGET_PORT: 8000
-    steps:
-      - name: Sign in to Azure with OIDC
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Resolve image names
-        id: images
-        shell: bash
-        run: |
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
-          echo "public=ghcr.io/${owner}/recruitment-foundry-public-portal:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "recruiter=ghcr.io/${owner}/recruitment-foundry-recruiter-portal:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "api=ghcr.io/${owner}/recruitment-foundry-api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify images are publicly pullable
-        env:
-          API_IMAGE: ${{ steps.images.outputs.api }}
-          PUBLIC_IMAGE: ${{ steps.images.outputs.public }}
-          RECRUITER_IMAGE: ${{ steps.images.outputs.recruiter }}
-        run: |
-          set -euo pipefail
-          for image in "$PUBLIC_IMAGE" "$RECRUITER_IMAGE" "$API_IMAGE"; do
-            if ! docker manifest inspect "$image" > /dev/null; then
-              echo "::error::Image '$image' is not publicly pullable. Set the GHCR package visibility to public."
-              exit 1
-            fi
+          for service in public-portal recruiter-portal api; do
+            image="${image_prefix}-${service}:${GITHUB_SHA}"
+            docker build --file "src/${service}/Dockerfile" --tag "$image" .
+            docker push "$image"
           done
 
-      - name: Verify update-only deployment targets
-        id: targets
+      - name: Deploy applications
         run: |
-          set -euo pipefail
-          for app in "$PUBLIC_PORTAL_APP" "$RECRUITER_PORTAL_APP" "$API_APP"; do
-            if ! app_json="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$app" --output json 2>/dev/null)"; then
-              echo "::error::Container App '$app' does not exist. This workflow is update-only and will not create Azure resources."
-              exit 1
-            fi
-
-            environment_id="$(jq -r '.properties.managedEnvironmentId' <<< "$app_json")"
-            external_ingress="$(jq -r '.properties.configuration.ingress.external' <<< "$app_json")"
-            if [[ "${environment_id,,}" != "${CONTAINER_APPS_ENVIRONMENT_ID,,}" ]]; then
-              echo "::error::Container App '$app' is not attached to the expected Container Apps Environment."
-              exit 1
-            fi
-            if [[ "$external_ingress" != "true" ]]; then
-              echo "::error::Container App '$app' must have external ingress enabled."
-              exit 1
-            fi
-          done
-
-          api_principal_id="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$API_APP" --query identity.principalId --output tsv)"
-          if [[ -z "$api_principal_id" || "$api_principal_id" == "null" || "$api_principal_id" == "None" ]]; then
-            echo "::error::The API Container App requires a system-assigned managed identity for Cosmos DB access."
-            exit 1
-          fi
-          echo "api_principal_id=$api_principal_id" >> "$GITHUB_OUTPUT"
-
-      - name: Configure ingress target ports
-        run: |
-          set -euo pipefail
-          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
-          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --target-port "$PORTAL_TARGET_PORT" --output none
-          az containerapp ingress update --resource-group "$RESOURCE_GROUP" --name "$API_APP" --target-port "$API_TARGET_PORT" --output none
-
-      - name: Grant API access to Cosmos DB
-        env:
-          API_PRINCIPAL_ID: ${{ steps.targets.outputs.api_principal_id }}
-        run: |
-          set -euo pipefail
-          cosmos_data_contributor_role="00000000-0000-0000-0000-000000000002"
-          cosmos_account_id="$(az cosmosdb show --name "$COSMOS_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query id --output tsv)"
-          assignments="$(az cosmosdb sql role assignment list \
-            --account-name "$COSMOS_ACCOUNT" \
-            --resource-group "$RESOURCE_GROUP" \
-            --output json)"
-          assignment_count="$(jq \
-            --arg principal_id "$API_PRINCIPAL_ID" \
-            --arg role_id "$cosmos_data_contributor_role" \
-            --arg account_id "$cosmos_account_id" \
-            '[.[] | select(
-              (.principalId | ascii_downcase) == ($principal_id | ascii_downcase) and
-              (.roleDefinitionId | ascii_downcase | endswith($role_id | ascii_downcase)) and
-              (.scope | rtrimstr("/") | ascii_downcase) == ($account_id | rtrimstr("/") | ascii_downcase)
-            )] | length' <<< "$assignments")"
-          if [[ "$assignment_count" == "0" ]]; then
-            az cosmosdb sql role assignment create \
-              --account-name "$COSMOS_ACCOUNT" \
-              --resource-group "$RESOURCE_GROUP" \
-              --scope "/" \
-              --principal-id "$API_PRINCIPAL_ID" \
-              --role-definition-id "$cosmos_data_contributor_role" \
-              --output none
-          fi
-
-      - name: Deploy API image and configuration
-        env:
-          API_IMAGE: ${{ steps.images.outputs.api }}
-        run: |
-          set -euo pipefail
-          az containerapp update \
-            --resource-group "$RESOURCE_GROUP" \
+          resource_group="$(azd env get-value AZURE_RESOURCE_GROUP)"
+          cosmos_endpoint="$(azd env get-value AZURE_COSMOS_ENDPOINT)"
+          cosmos_database="$(azd env get-value AZURE_COSMOS_DATABASE_NAME)"
+          image_prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
+          api_fqdn="$(az containerapp show \
+            --resource-group "$resource_group" \
             --name "$API_APP" \
-            --image "$API_IMAGE" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+          api_url="https://${api_fqdn}"
+
+          az containerapp update \
+            --resource-group "$resource_group" \
+            --name "$API_APP" \
+            --image "${image_prefix}-api:${GITHUB_SHA}" \
             --set-env-vars \
-              AZURE_COSMOS_ENDPOINT="$COSMOS_ENDPOINT" \
-              AZURE_COSMOS_DATABASE_NAME="$COSMOS_DATABASE" \
+              PORT=8000 \
+              AZURE_COSMOS_ENDPOINT="$cosmos_endpoint" \
+              AZURE_COSMOS_DATABASE_NAME="$cosmos_database" \
               AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs \
             --output none
 
-      - name: Resolve public API URL
-        id: api
-        run: |
-          set -euo pipefail
-          fqdn="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$API_APP" --query properties.configuration.ingress.fqdn --output tsv)"
-          if [[ -z "$fqdn" ]]; then
-            echo "::error::The API Container App does not expose an ingress FQDN."
-            exit 1
-          fi
-          echo "url=https://${fqdn}" >> "$GITHUB_OUTPUT"
+          az containerapp update \
+            --resource-group "$resource_group" \
+            --name "$PUBLIC_PORTAL_APP" \
+            --image "${image_prefix}-public-portal:${GITHUB_SHA}" \
+            --set-env-vars PORT=3000 API_BASE_URL="$api_url" \
+            --output none
 
-      - name: Deploy portal images and API URL
-        env:
-          API_URL: ${{ steps.api.outputs.url }}
-          PUBLIC_IMAGE: ${{ steps.images.outputs.public }}
-          RECRUITER_IMAGE: ${{ steps.images.outputs.recruiter }}
-        run: |
-          set -euo pipefail
-          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$PUBLIC_PORTAL_APP" --image "$PUBLIC_IMAGE" --set-env-vars API_BASE_URL="$API_URL" --output none
-          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$RECRUITER_PORTAL_APP" --image "$RECRUITER_IMAGE" --set-env-vars API_BASE_URL="$API_URL" --output none
+          az containerapp update \
+            --resource-group "$resource_group" \
+            --name "$RECRUITER_PORTAL_APP" \
+            --image "${image_prefix}-recruiter-portal:${GITHUB_SHA}" \
+            --set-env-vars PORT=3000 API_BASE_URL="$api_url" \
+            --output none
 
-      - name: Verify deployed endpoints
-        env:
-          API_URL: ${{ steps.api.outputs.url }}
+      - name: Verify deployment
         run: |
-          set -euo pipefail
-          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "${API_URL}/health"
-          for app in "$PUBLIC_PORTAL_APP" "$RECRUITER_PORTAL_APP"; do
-            fqdn="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$app" --query properties.configuration.ingress.fqdn --output tsv)"
-            curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${fqdn}/"
-          done
+          resource_group="$(azd env get-value AZURE_RESOURCE_GROUP)"
+          api_fqdn="$(az containerapp show --resource-group "$resource_group" --name "$API_APP" --query properties.configuration.ingress.fqdn --output tsv)"
+          public_fqdn="$(az containerapp show --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --query properties.configuration.ingress.fqdn --output tsv)"
+          recruiter_fqdn="$(az containerapp show --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --query properties.configuration.ingress.fqdn --output tsv)"
+
+          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${api_fqdn}/health"
+          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${public_fqdn}/"
+          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${recruiter_fqdn}/"

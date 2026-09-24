@@ -1,6 +1,6 @@
 # Continuous deployment
 
-Every pull request validates infrastructure and applications. Every push to `main` repeats those checks, provisions the existing Azure foundation with `azd`, publishes immutable container images to GitHub Container Registry, and updates the existing development Container Apps.
+Every pull request validates infrastructure and applications. Every push to `main` runs one deployment job that provisions the Azure foundation with `azd`, publishes immutable container images to GitHub Container Registry, updates the existing development Container Apps, and smoke-tests their endpoints.
 
 ## Workflows
 
@@ -8,7 +8,7 @@ Every pull request validates infrastructure and applications. Every push to `mai
 | --- | --- |
 | `validate-infra.yml` | Compiles Bicep and parameter files, parses `azure.yaml`, runs Azure what-if, and rejects resource deletions. |
 | `validate-apps.yml` | Lints and builds both Next.js portals, tests and packages FastAPI, and builds all three container images. |
-| `deploy-dev.yml` | Uses OIDC, runs both validation workflows, provisions with `azd`, publishes commit-tagged images, and updates existing Container Apps. |
+| `deploy-dev.yml` | Uses OIDC, provisions with `azd`, publishes commit-tagged images, updates the three existing Container Apps, and smoke-tests them. |
 
 Validation jobs fail on the first command error and emit GitHub annotations for missing configuration, destructive infrastructure changes, or invalid deployment targets.
 
@@ -44,18 +44,16 @@ The workflows publish to GHCR with the repository-scoped `GITHUB_TOKEN`. Make th
 
 ## Existing-resource prerequisite
 
-The current Bicep foundation does not define application Container Apps or a container registry. To preserve the requirement that this change introduce no Azure resources, deployment is update-only. Before enabling continuous deployment, the three named Container Apps must already exist in the provisioned `cae-recruitment-dev` environment with external ingress enabled. Deployment configures portal ingress target ports to `3000` and API ingress target port to `8000`.
+The current Bicep foundation does not define application Container Apps or a container registry. The three named Container Apps must already exist in the provisioned `cae-recruitment-dev` environment with external ingress enabled. Portal ingress must target port `3000`; API ingress must target port `8000`.
 
-The API Container App must have a system-assigned managed identity. The workflow grants that identity the Cosmos DB Built-in Data Contributor role at the account root scope, which lets the API create/read the `jobs` container and manage its items.
-
-If a target app is absent, attached to another environment, lacks external ingress, or the API lacks managed identity, deployment stops before changing an app.
+The API Container App must have a system-assigned managed identity with the Cosmos DB Built-in Data Contributor role at the account root scope. These are one-time environment prerequisites rather than work repeated by every demo deployment.
 
 ## Runtime configuration
 
 The deployment workflow reads safe values from `azd` outputs. It configures:
 
-- API: `AZURE_COSMOS_ENDPOINT`, `AZURE_COSMOS_DATABASE_NAME`, and `AZURE_COSMOS_JOBS_CONTAINER_NAME`.
-- Portals: `API_BASE_URL`, set to the public HTTPS API endpoint.
+- API: `PORT`, `AZURE_COSMOS_ENDPOINT`, `AZURE_COSMOS_DATABASE_NAME`, and `AZURE_COSMOS_JOBS_CONTAINER_NAME`.
+- Portals: `PORT` and `API_BASE_URL`, set to the public HTTPS API endpoint.
 
 Local templates are committed beside each application as `.env.example` or `.env.local.example`. Keep real `.env` files untracked.
 
