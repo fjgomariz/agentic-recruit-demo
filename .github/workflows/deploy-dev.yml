@@ -233,7 +233,7 @@ jobs:
             '[.[] | select(
               (.principalId | ascii_downcase) == ($principal_id | ascii_downcase) and
               (.roleDefinitionId | ascii_downcase | endswith($role_id | ascii_downcase)) and
-              (.scope | ascii_downcase) == ($account_id | ascii_downcase)
+              (.scope | rtrimstr("/") | ascii_downcase) == ($account_id | rtrimstr("/") | ascii_downcase)
             )] | length' <<< "$assignments")"
           if [[ "$assignment_count" == "0" ]]; then
             az cosmosdb sql role assignment create \
