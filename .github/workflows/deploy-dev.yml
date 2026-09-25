@@ -126,10 +126,19 @@ jobs:
         run: |
           az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors
           resource_group="rg-recruitment-${AZURE_ENV_NAME}"
+          az containerapp env show --resource-group "$resource_group" --name "cae-recruitment-${AZURE_ENV_NAME}" \
+            --query "{provisioning:properties.provisioningState,errors:properties.deploymentErrors}" --output json || true
           for app in "ca-recruitment-api-${AZURE_ENV_NAME}" "ca-recruitment-public-${AZURE_ENV_NAME}" "ca-recruitment-recruiter-${AZURE_ENV_NAME}"; do
             echo "::group::$app"
+            if ! az containerapp show --resource-group "$resource_group" --name "$app" \
+              --query "{provisioning:properties.provisioningState,latest:properties.latestRevisionName,ready:properties.latestReadyRevisionName,image:properties.template.containers[0].image}" \
+              --output json 2>/dev/null; then
+              echo "$app does not exist"
+              echo "::endgroup::"
+              continue
+            fi
             az containerapp revision list --resource-group "$resource_group" --name "$app" --all --output table || true
-            az containerapp logs show --resource-group "$resource_group" --name "$app" --type system --tail 40 --format text || true
+            az containerapp logs show --resource-group "$resource_group" --name "$app" --type system --tail 40 || true
             az containerapp logs show --resource-group "$resource_group" --name "$app" --type console --tail 40 --format text || true
             echo "::endgroup::"
           done
