@@ -55,6 +55,42 @@ The deployment workflow reads safe values from `azd` outputs. It configures:
 - API: `PORT`, `AZURE_COSMOS_ENDPOINT`, `AZURE_COSMOS_DATABASE_NAME`, and `AZURE_COSMOS_JOBS_CONTAINER_NAME`.
 - Portals: `PORT` and `API_BASE_URL`, set to the public HTTPS API endpoint.
 
+Each Container App is updated in a separate workflow step using Azure CLI
+directly. The update is submitted with `--no-wait`, then the workflow prints the
+provisioning state, running state, latest revision, and latest ready revision
+every ten seconds. A failed update prints the revision list, and each application
+has a 15-minute timeout.
+
+To submit the same API update locally without the opaque Azure CLI spinner:
+
+```powershell
+az containerapp update `
+  --resource-group "rg-recruitment-dev" `
+  --name "ca-recruitment-api-dev" `
+  --image "ghcr.io/<owner>/recruitment-foundry-api:<tag>" `
+  --set-env-vars `
+    PORT=8000 `
+    AZURE_COSMOS_ENDPOINT="<endpoint>" `
+    AZURE_COSMOS_DATABASE_NAME=recruitment `
+    AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs `
+  --no-wait
+```
+
+Inspect its progress separately:
+
+```powershell
+az containerapp show `
+  --resource-group "rg-recruitment-dev" `
+  --name "ca-recruitment-api-dev" `
+  --query "{provisioning:properties.provisioningState,running:properties.runningStatus,latest:properties.latestRevisionName,ready:properties.latestReadyRevisionName}" `
+  --output table
+
+az containerapp revision list `
+  --resource-group "rg-recruitment-dev" `
+  --name "ca-recruitment-api-dev" `
+  --output table
+```
+
 Local templates are committed beside each application as `.env.example` or `.env.local.example`. Keep real `.env` files untracked.
 
 ## Branch protection

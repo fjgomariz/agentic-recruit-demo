@@ -74,19 +74,38 @@ jobs:
             docker push "$image"
           done
 
-      - name: Deploy applications
+      - name: Read deployment outputs
+        id: deployment
         run: |
           resource_group="$(azd env get-value AZURE_RESOURCE_GROUP)"
           cosmos_endpoint="$(azd env get-value AZURE_COSMOS_ENDPOINT)"
           cosmos_database="$(azd env get-value AZURE_COSMOS_DATABASE_NAME)"
-          image_prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
           api_fqdn="$(az containerapp show \
             --resource-group "$resource_group" \
             --name "$API_APP" \
             --query properties.configuration.ingress.fqdn \
             --output tsv)"
-          api_url="https://${api_fqdn}"
 
+          {
+            echo "resource_group=$resource_group"
+            echo "cosmos_endpoint=$cosmos_endpoint"
+            echo "cosmos_database=$cosmos_database"
+            echo "api_url=https://${api_fqdn}"
+            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resource group: $resource_group"
+          echo "API endpoint: https://${api_fqdn}"
+
+      - name: Deploy API
+        run: |
+          previous_revision="$(az containerapp show \
+            --resource-group "$resource_group" \
+            --name "$API_APP" \
+            --query properties.latestRevisionName \
+            --output tsv)"
+
+          echo "Updating $API_APP from revision $previous_revision"
           az containerapp update \
             --resource-group "$resource_group" \
             --name "$API_APP" \
@@ -96,21 +115,142 @@ jobs:
               AZURE_COSMOS_ENDPOINT="$cosmos_endpoint" \
               AZURE_COSMOS_DATABASE_NAME="$cosmos_database" \
               AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs \
+            --no-wait \
+            --only-show-errors \
             --output none
 
+          observed_progress=false
+          for attempt in {1..90}; do
+            status="$(az containerapp show \
+              --resource-group "$resource_group" \
+              --name "$API_APP" \
+              --query "join('|', [properties.provisioningState, properties.runningStatus, properties.latestRevisionName, properties.latestReadyRevisionName])" \
+              --output tsv)"
+            IFS='|' read -r provisioning running latest ready <<< "$status"
+            echo "attempt=$attempt provisioning=$provisioning running=$running latest=$latest ready=$ready"
+
+            [[ "$provisioning" == "InProgress" ]] && observed_progress=true
+            if [[ "$provisioning" == "Succeeded" && "$latest" != "$previous_revision" && "$latest" == "$ready" ]]; then
+              echo "$API_APP deployed successfully"
+              break
+            fi
+            if [[ "$provisioning" == "Failed" && ("$observed_progress" == "true" || "$latest" != "$previous_revision" || "$attempt" -ge 12) ]]; then
+              echo "::error::$API_APP provisioning failed"
+              az containerapp revision list --resource-group "$resource_group" --name "$API_APP" --output table
+              exit 1
+            fi
+            if [[ "$attempt" -eq 90 ]]; then
+              echo "::error::Timed out waiting for $API_APP after 15 minutes"
+              az containerapp revision list --resource-group "$resource_group" --name "$API_APP" --output table
+              exit 1
+            fi
+            sleep 10
+          done
+        env:
+          resource_group: ${{ steps.deployment.outputs.resource_group }}
+          cosmos_endpoint: ${{ steps.deployment.outputs.cosmos_endpoint }}
+          cosmos_database: ${{ steps.deployment.outputs.cosmos_database }}
+          image_prefix: ${{ steps.deployment.outputs.image_prefix }}
+
+      - name: Deploy public portal
+        run: |
+          previous_revision="$(az containerapp show \
+            --resource-group "$resource_group" \
+            --name "$PUBLIC_PORTAL_APP" \
+            --query properties.latestRevisionName \
+            --output tsv)"
+
+          echo "Updating $PUBLIC_PORTAL_APP from revision $previous_revision"
           az containerapp update \
             --resource-group "$resource_group" \
             --name "$PUBLIC_PORTAL_APP" \
             --image "${image_prefix}-public-portal:${GITHUB_SHA}" \
             --set-env-vars PORT=3000 API_BASE_URL="$api_url" \
+            --no-wait \
+            --only-show-errors \
             --output none
 
+          observed_progress=false
+          for attempt in {1..90}; do
+            status="$(az containerapp show \
+              --resource-group "$resource_group" \
+              --name "$PUBLIC_PORTAL_APP" \
+              --query "join('|', [properties.provisioningState, properties.runningStatus, properties.latestRevisionName, properties.latestReadyRevisionName])" \
+              --output tsv)"
+            IFS='|' read -r provisioning running latest ready <<< "$status"
+            echo "attempt=$attempt provisioning=$provisioning running=$running latest=$latest ready=$ready"
+
+            [[ "$provisioning" == "InProgress" ]] && observed_progress=true
+            if [[ "$provisioning" == "Succeeded" && "$latest" != "$previous_revision" && "$latest" == "$ready" ]]; then
+              echo "$PUBLIC_PORTAL_APP deployed successfully"
+              break
+            fi
+            if [[ "$provisioning" == "Failed" && ("$observed_progress" == "true" || "$latest" != "$previous_revision" || "$attempt" -ge 12) ]]; then
+              echo "::error::$PUBLIC_PORTAL_APP provisioning failed"
+              az containerapp revision list --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --output table
+              exit 1
+            fi
+            if [[ "$attempt" -eq 90 ]]; then
+              echo "::error::Timed out waiting for $PUBLIC_PORTAL_APP after 15 minutes"
+              az containerapp revision list --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --output table
+              exit 1
+            fi
+            sleep 10
+          done
+        env:
+          resource_group: ${{ steps.deployment.outputs.resource_group }}
+          api_url: ${{ steps.deployment.outputs.api_url }}
+          image_prefix: ${{ steps.deployment.outputs.image_prefix }}
+
+      - name: Deploy recruiter portal
+        run: |
+          previous_revision="$(az containerapp show \
+            --resource-group "$resource_group" \
+            --name "$RECRUITER_PORTAL_APP" \
+            --query properties.latestRevisionName \
+            --output tsv)"
+
+          echo "Updating $RECRUITER_PORTAL_APP from revision $previous_revision"
           az containerapp update \
             --resource-group "$resource_group" \
             --name "$RECRUITER_PORTAL_APP" \
             --image "${image_prefix}-recruiter-portal:${GITHUB_SHA}" \
             --set-env-vars PORT=3000 API_BASE_URL="$api_url" \
+            --no-wait \
+            --only-show-errors \
             --output none
+
+          observed_progress=false
+          for attempt in {1..90}; do
+            status="$(az containerapp show \
+              --resource-group "$resource_group" \
+              --name "$RECRUITER_PORTAL_APP" \
+              --query "join('|', [properties.provisioningState, properties.runningStatus, properties.latestRevisionName, properties.latestReadyRevisionName])" \
+              --output tsv)"
+            IFS='|' read -r provisioning running latest ready <<< "$status"
+            echo "attempt=$attempt provisioning=$provisioning running=$running latest=$latest ready=$ready"
+
+            [[ "$provisioning" == "InProgress" ]] && observed_progress=true
+            if [[ "$provisioning" == "Succeeded" && "$latest" != "$previous_revision" && "$latest" == "$ready" ]]; then
+              echo "$RECRUITER_PORTAL_APP deployed successfully"
+              break
+            fi
+            if [[ "$provisioning" == "Failed" && ("$observed_progress" == "true" || "$latest" != "$previous_revision" || "$attempt" -ge 12) ]]; then
+              echo "::error::$RECRUITER_PORTAL_APP provisioning failed"
+              az containerapp revision list --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --output table
+              exit 1
+            fi
+            if [[ "$attempt" -eq 90 ]]; then
+              echo "::error::Timed out waiting for $RECRUITER_PORTAL_APP after 15 minutes"
+              az containerapp revision list --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --output table
+              exit 1
+            fi
+            sleep 10
+          done
+        env:
+          resource_group: ${{ steps.deployment.outputs.resource_group }}
+          api_url: ${{ steps.deployment.outputs.api_url }}
+          image_prefix: ${{ steps.deployment.outputs.image_prefix }}
 
       - name: Verify deployment
         run: |
