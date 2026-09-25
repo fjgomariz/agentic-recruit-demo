@@ -121,7 +121,6 @@ jobs:
               AZURE_COSMOS_ENDPOINT="$cosmos_endpoint" \
               AZURE_COSMOS_DATABASE_NAME="$cosmos_database" \
               AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs \
-            --only-show-errors \
             --output none >"$deployment_log" 2>&1 &
           deployment_pid=$!
           deployment_finished=false
@@ -194,7 +193,6 @@ jobs:
             --ingress external \
             --target-port 3000 \
             --env-vars PORT=3000 API_BASE_URL="$api_url" \
-            --only-show-errors \
             --output none >"$deployment_log" 2>&1 &
           deployment_pid=$!
           deployment_finished=false
@@ -266,7 +264,6 @@ jobs:
             --ingress external \
             --target-port 3000 \
             --env-vars PORT=3000 API_BASE_URL="$api_url" \
-            --only-show-errors \
             --output none >"$deployment_log" 2>&1 &
           deployment_pid=$!
           deployment_finished=false
