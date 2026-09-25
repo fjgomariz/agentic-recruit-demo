@@ -1,9 +1,11 @@
 """Application-scoped repository and service dependencies."""
 
+import asyncio
+import contextlib
 import logging
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 
 from app.config import CosmosSettings
 from app.domain import Candidate, CandidateEvaluation, Job
@@ -13,45 +15,76 @@ from app.services import CrudService
 
 logger = logging.getLogger(__name__)
 
+COSMOS_RETRY_SECONDS = 10
+
 _job_repository: CosmosJobRepository | None = None
 _job_service: CrudService[Job] | None = None
+_job_service_task: asyncio.Task[None] | None = None
 _candidate_service = CrudService(InMemoryRepository(create_seed_candidates()), "Candidate")
 _evaluation_service = CrudService(InMemoryRepository(create_seed_evaluations()), "Evaluation")
 
 
-async def initialize_job_service() -> None:
-    """Initialize Cosmos DB persistence and seed a new demo container."""
+async def _connect_job_service(settings: CosmosSettings) -> None:
+    """Connect to Cosmos DB and seed an empty jobs container."""
 
     global _job_repository, _job_service
-    repository = CosmosJobRepository(CosmosSettings.from_environment())
+    repository = CosmosJobRepository(settings)
     try:
         await repository.initialize()
         if not await repository.list():
             for job in create_seed_jobs():
                 await repository.create(job)
             logger.info("Seeded the empty Cosmos DB jobs container")
-    except Exception:
+    except BaseException:
         await repository.close()
         raise
     _job_repository = repository
     _job_service = CrudService(repository, "Job")
 
 
-async def close_job_service() -> None:
-    """Close the application-scoped Cosmos DB client."""
+async def _connect_job_service_with_retry(settings: CosmosSettings) -> None:
+    """Keep retrying so transient network or RBAC propagation delays never crash the API."""
 
-    global _job_repository, _job_service
+    while True:
+        try:
+            await _connect_job_service(settings)
+            return
+        except Exception:
+            logger.exception("Cosmos DB is not reachable yet; retrying in %s seconds", COSMOS_RETRY_SECONDS)
+            await asyncio.sleep(COSMOS_RETRY_SECONDS)
+
+
+async def initialize_job_service() -> None:
+    """Validate configuration and connect to Cosmos DB in the background."""
+
+    global _job_service_task
+    settings = CosmosSettings.from_environment()
+    _job_service_task = asyncio.create_task(_connect_job_service_with_retry(settings))
+
+
+async def close_job_service() -> None:
+    """Stop pending connection attempts and close the Cosmos DB client."""
+
+    global _job_repository, _job_service, _job_service_task
+    if _job_service_task is not None:
+        _job_service_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _job_service_task
     if _job_repository is not None:
         await _job_repository.close()
     _job_repository = None
     _job_service = None
+    _job_service_task = None
 
 
 def get_job_service() -> CrudService[Job]:
     """Provide the application-scoped job service."""
 
     if _job_service is None:
-        raise RuntimeError("Job service has not been initialized")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Job storage is still connecting. Retry shortly.",
+        )
     return _job_service
 
 

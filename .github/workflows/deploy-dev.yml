@@ -16,21 +16,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy demo
+  images:
+    name: Publish ${{ matrix.service }} image
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        service:
+          - api
+          - public-portal
+          - recruiter-portal
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Resolve image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry-${{ matrix.service }}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.name }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    name: Deploy to Azure
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: dev
     env:
       AZURE_ENV_NAME: dev
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'swedencentral' }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      PUBLIC_PORTAL_APP: ${{ vars.PUBLIC_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-public-dev' }}
-      RECRUITER_PORTAL_APP: ${{ vars.RECRUITER_PORTAL_CONTAINER_APP_NAME || 'ca-recruitment-recruiter-dev' }}
-      API_APP: ${{ vars.API_CONTAINER_APP_NAME || 'ca-recruitment-api-dev' }}
-
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Sign in to Azure
         uses: azure/login@v2
@@ -42,288 +81,55 @@ jobs:
       - name: Install Azure Developer CLI
         uses: Azure/setup-azd@v2
 
-      - name: Run azd provision
-        env:
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      - name: Provision infrastructure and Container Apps
         run: |
+          set -euo pipefail
+          image_prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
+
           azd auth login \
             --client-id "$AZURE_CLIENT_ID" \
             --tenant-id "$AZURE_TENANT_ID" \
             --federated-credential-provider github
-          azd env new "$AZURE_ENV_NAME" --no-prompt
-          azd env config set infra.parameters.environmentName "$AZURE_ENV_NAME"
-          azd env set AZURE_LOCATION "$AZURE_LOCATION"
-          azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+          azd env select "$AZURE_ENV_NAME" 2>/dev/null || azd env new "$AZURE_ENV_NAME" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --location "$AZURE_LOCATION" \
+            --no-prompt
+          azd env set API_IMAGE "${image_prefix}-api:${GITHUB_SHA}"
+          azd env set PUBLIC_PORTAL_IMAGE "${image_prefix}-public-portal:${GITHUB_SHA}"
+          azd env set RECRUITER_PORTAL_IMAGE "${image_prefix}-recruiter-portal:${GITHUB_SHA}"
           azd provision --no-prompt
 
-      - name: Sign in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and publish images
+      - name: Smoke test endpoints
         run: |
-          image_prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
+          set -euo pipefail
+          api_url="$(azd env get-value API_URL)"
+          public_url="$(azd env get-value PUBLIC_PORTAL_URL)"
+          recruiter_url="$(azd env get-value RECRUITER_PORTAL_URL)"
 
-          for service in public-portal recruiter-portal api; do
-            image="${image_prefix}-${service}:${GITHUB_SHA}"
-            docker build --file "src/${service}/Dockerfile" --tag "$image" .
-            docker push "$image"
-          done
-
-      - name: Read deployment outputs
-        id: deployment
-        run: |
-          resource_group="$(azd env get-value AZURE_RESOURCE_GROUP)"
-          cosmos_endpoint="$(azd env get-value AZURE_COSMOS_ENDPOINT)"
-          cosmos_database="$(azd env get-value AZURE_COSMOS_DATABASE_NAME)"
-          container_apps_environment="$(azd env get-value AZURE_CONTAINER_APPS_ENVIRONMENT_NAME)"
-          api_fqdn="$(az containerapp show \
-            --resource-group "$resource_group" \
-            --name "$API_APP" \
-            --query properties.configuration.ingress.fqdn \
-            --output tsv)"
+          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${api_url}/health"
+          echo
+          curl --silent --show-error --fail-with-body --retry 60 --retry-all-errors --retry-delay 6 "${api_url}/jobs" --output /dev/null
+          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${public_url}/" --output /dev/null
+          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${recruiter_url}/" --output /dev/null
 
           {
-            echo "resource_group=$resource_group"
-            echo "cosmos_endpoint=$cosmos_endpoint"
-            echo "cosmos_database=$cosmos_database"
-            echo "container_apps_environment=$container_apps_environment"
-            echo "api_url=https://${api_fqdn}"
-            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/recruitment-foundry"
-          } >> "$GITHUB_OUTPUT"
+            echo "### Deployed ${GITHUB_SHA::7}"
+            echo "| App | URL |"
+            echo "| --- | --- |"
+            echo "| API | ${api_url} |"
+            echo "| Public portal | ${public_url} |"
+            echo "| Recruiter portal | ${recruiter_url} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Resource group: $resource_group"
-          echo "API endpoint: https://${api_fqdn}"
-
-      - name: Deploy API
+      - name: Show Container Apps diagnostics
+        if: failure()
         run: |
-          previous_revision="$(az containerapp show \
-            --resource-group "$resource_group" \
-            --name "$API_APP" \
-            --query properties.latestRevisionName \
-            --output tsv)"
-
-          echo "Updating $API_APP from revision $previous_revision"
-          deployment_log="$RUNNER_TEMP/${API_APP}-deployment.log"
-          az containerapp up \
-            --resource-group "$resource_group" \
-            --name "$API_APP" \
-            --environment "$container_apps_environment" \
-            --image "${image_prefix}-api:${GITHUB_SHA}" \
-            --ingress external \
-            --target-port 8000 \
-            --env-vars \
-              PORT=8000 \
-              AZURE_COSMOS_ENDPOINT="$cosmos_endpoint" \
-              AZURE_COSMOS_DATABASE_NAME="$cosmos_database" \
-              AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs \
-            >"$deployment_log" 2>&1 &
-          deployment_pid=$!
-          deployment_finished=false
-
-          observed_progress=false
-          for attempt in {1..90}; do
-            if [[ "$deployment_finished" == "false" ]] && ! kill -0 "$deployment_pid" 2>/dev/null; then
-              deployment_finished=true
-              if ! wait "$deployment_pid"; then
-                echo "::error::Azure CLI failed while updating $API_APP"
-                cat "$deployment_log"
-                az containerapp revision list --resource-group "$resource_group" --name "$API_APP" --output table
-                exit 1
-              fi
-            fi
-
-            status="$(az containerapp show \
-              --resource-group "$resource_group" \
-              --name "$API_APP" \
-              --query "join('|', [properties.provisioningState, properties.runningStatus, properties.latestRevisionName, properties.latestReadyRevisionName])" \
-              --output tsv)"
-            IFS='|' read -r provisioning running latest ready <<< "$status"
-            echo "attempt=$attempt provisioning=$provisioning running=$running latest=$latest ready=$ready"
-
-            [[ "$provisioning" == "InProgress" ]] && observed_progress=true
-            if [[ "$provisioning" == "Succeeded" && "$latest" != "$previous_revision" && "$latest" == "$ready" ]]; then
-              if [[ "$deployment_finished" == "false" ]] && ! wait "$deployment_pid"; then
-                echo "::error::Azure CLI failed while finalizing $API_APP"
-                cat "$deployment_log"
-                exit 1
-              fi
-              echo "$API_APP deployed successfully"
-              break
-            fi
-            if [[ "$provisioning" == "Failed" && ("$observed_progress" == "true" || "$latest" != "$previous_revision" || "$attempt" -ge 12) ]]; then
-              echo "::error::$API_APP provisioning failed"
-              az containerapp revision list --resource-group "$resource_group" --name "$API_APP" --output table
-              exit 1
-            fi
-            if [[ "$attempt" -eq 90 ]]; then
-              echo "::error::Timed out waiting for $API_APP after 15 minutes"
-              cat "$deployment_log"
-              az containerapp revision list --resource-group "$resource_group" --name "$API_APP" --output table
-              exit 1
-            fi
-            sleep 10
+          az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors
+          resource_group="rg-recruitment-${AZURE_ENV_NAME}"
+          for app in "ca-recruitment-api-${AZURE_ENV_NAME}" "ca-recruitment-public-${AZURE_ENV_NAME}" "ca-recruitment-recruiter-${AZURE_ENV_NAME}"; do
+            echo "::group::$app"
+            az containerapp revision list --resource-group "$resource_group" --name "$app" --all --output table || true
+            az containerapp logs show --resource-group "$resource_group" --name "$app" --type system --tail 40 --format text || true
+            az containerapp logs show --resource-group "$resource_group" --name "$app" --type console --tail 40 --format text || true
+            echo "::endgroup::"
           done
-        env:
-          resource_group: ${{ steps.deployment.outputs.resource_group }}
-          cosmos_endpoint: ${{ steps.deployment.outputs.cosmos_endpoint }}
-          cosmos_database: ${{ steps.deployment.outputs.cosmos_database }}
-          container_apps_environment: ${{ steps.deployment.outputs.container_apps_environment }}
-          image_prefix: ${{ steps.deployment.outputs.image_prefix }}
-
-      - name: Deploy public portal
-        run: |
-          previous_revision="$(az containerapp show \
-            --resource-group "$resource_group" \
-            --name "$PUBLIC_PORTAL_APP" \
-            --query properties.latestRevisionName \
-            --output tsv)"
-
-          echo "Updating $PUBLIC_PORTAL_APP from revision $previous_revision"
-          deployment_log="$RUNNER_TEMP/${PUBLIC_PORTAL_APP}-deployment.log"
-          az containerapp up \
-            --resource-group "$resource_group" \
-            --name "$PUBLIC_PORTAL_APP" \
-            --environment "$container_apps_environment" \
-            --image "${image_prefix}-public-portal:${GITHUB_SHA}" \
-            --ingress external \
-            --target-port 3000 \
-            --env-vars PORT=3000 API_BASE_URL="$api_url" \
-            >"$deployment_log" 2>&1 &
-          deployment_pid=$!
-          deployment_finished=false
-
-          observed_progress=false
-          for attempt in {1..90}; do
-            if [[ "$deployment_finished" == "false" ]] && ! kill -0 "$deployment_pid" 2>/dev/null; then
-              deployment_finished=true
-              if ! wait "$deployment_pid"; then
-                echo "::error::Azure CLI failed while updating $PUBLIC_PORTAL_APP"
-                cat "$deployment_log"
-                az containerapp revision list --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --output table
-                exit 1
-              fi
-            fi
-
-            status="$(az containerapp show \
-              --resource-group "$resource_group" \
-              --name "$PUBLIC_PORTAL_APP" \
-              --query "join('|', [properties.provisioningState, properties.runningStatus, properties.latestRevisionName, properties.latestReadyRevisionName])" \
-              --output tsv)"
-            IFS='|' read -r provisioning running latest ready <<< "$status"
-            echo "attempt=$attempt provisioning=$provisioning running=$running latest=$latest ready=$ready"
-
-            [[ "$provisioning" == "InProgress" ]] && observed_progress=true
-            if [[ "$provisioning" == "Succeeded" && "$latest" != "$previous_revision" && "$latest" == "$ready" ]]; then
-              if [[ "$deployment_finished" == "false" ]] && ! wait "$deployment_pid"; then
-                echo "::error::Azure CLI failed while finalizing $PUBLIC_PORTAL_APP"
-                cat "$deployment_log"
-                exit 1
-              fi
-              echo "$PUBLIC_PORTAL_APP deployed successfully"
-              break
-            fi
-            if [[ "$provisioning" == "Failed" && ("$observed_progress" == "true" || "$latest" != "$previous_revision" || "$attempt" -ge 12) ]]; then
-              echo "::error::$PUBLIC_PORTAL_APP provisioning failed"
-              az containerapp revision list --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --output table
-              exit 1
-            fi
-            if [[ "$attempt" -eq 90 ]]; then
-              echo "::error::Timed out waiting for $PUBLIC_PORTAL_APP after 15 minutes"
-              cat "$deployment_log"
-              az containerapp revision list --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --output table
-              exit 1
-            fi
-            sleep 10
-          done
-        env:
-          resource_group: ${{ steps.deployment.outputs.resource_group }}
-          api_url: ${{ steps.deployment.outputs.api_url }}
-          container_apps_environment: ${{ steps.deployment.outputs.container_apps_environment }}
-          image_prefix: ${{ steps.deployment.outputs.image_prefix }}
-
-      - name: Deploy recruiter portal
-        run: |
-          previous_revision="$(az containerapp show \
-            --resource-group "$resource_group" \
-            --name "$RECRUITER_PORTAL_APP" \
-            --query properties.latestRevisionName \
-            --output tsv)"
-
-          echo "Updating $RECRUITER_PORTAL_APP from revision $previous_revision"
-          deployment_log="$RUNNER_TEMP/${RECRUITER_PORTAL_APP}-deployment.log"
-          az containerapp up \
-            --resource-group "$resource_group" \
-            --name "$RECRUITER_PORTAL_APP" \
-            --environment "$container_apps_environment" \
-            --image "${image_prefix}-recruiter-portal:${GITHUB_SHA}" \
-            --ingress external \
-            --target-port 3000 \
-            --env-vars PORT=3000 API_BASE_URL="$api_url" \
-            >"$deployment_log" 2>&1 &
-          deployment_pid=$!
-          deployment_finished=false
-
-          observed_progress=false
-          for attempt in {1..90}; do
-            if [[ "$deployment_finished" == "false" ]] && ! kill -0 "$deployment_pid" 2>/dev/null; then
-              deployment_finished=true
-              if ! wait "$deployment_pid"; then
-                echo "::error::Azure CLI failed while updating $RECRUITER_PORTAL_APP"
-                cat "$deployment_log"
-                az containerapp revision list --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --output table
-                exit 1
-              fi
-            fi
-
-            status="$(az containerapp show \
-              --resource-group "$resource_group" \
-              --name "$RECRUITER_PORTAL_APP" \
-              --query "join('|', [properties.provisioningState, properties.runningStatus, properties.latestRevisionName, properties.latestReadyRevisionName])" \
-              --output tsv)"
-            IFS='|' read -r provisioning running latest ready <<< "$status"
-            echo "attempt=$attempt provisioning=$provisioning running=$running latest=$latest ready=$ready"
-
-            [[ "$provisioning" == "InProgress" ]] && observed_progress=true
-            if [[ "$provisioning" == "Succeeded" && "$latest" != "$previous_revision" && "$latest" == "$ready" ]]; then
-              if [[ "$deployment_finished" == "false" ]] && ! wait "$deployment_pid"; then
-                echo "::error::Azure CLI failed while finalizing $RECRUITER_PORTAL_APP"
-                cat "$deployment_log"
-                exit 1
-              fi
-              echo "$RECRUITER_PORTAL_APP deployed successfully"
-              break
-            fi
-            if [[ "$provisioning" == "Failed" && ("$observed_progress" == "true" || "$latest" != "$previous_revision" || "$attempt" -ge 12) ]]; then
-              echo "::error::$RECRUITER_PORTAL_APP provisioning failed"
-              az containerapp revision list --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --output table
-              exit 1
-            fi
-            if [[ "$attempt" -eq 90 ]]; then
-              echo "::error::Timed out waiting for $RECRUITER_PORTAL_APP after 15 minutes"
-              cat "$deployment_log"
-              az containerapp revision list --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --output table
-              exit 1
-            fi
-            sleep 10
-          done
-        env:
-          resource_group: ${{ steps.deployment.outputs.resource_group }}
-          api_url: ${{ steps.deployment.outputs.api_url }}
-          container_apps_environment: ${{ steps.deployment.outputs.container_apps_environment }}
-          image_prefix: ${{ steps.deployment.outputs.image_prefix }}
-
-      - name: Verify deployment
-        run: |
-          resource_group="$(azd env get-value AZURE_RESOURCE_GROUP)"
-          api_fqdn="$(az containerapp show --resource-group "$resource_group" --name "$API_APP" --query properties.configuration.ingress.fqdn --output tsv)"
-          public_fqdn="$(az containerapp show --resource-group "$resource_group" --name "$PUBLIC_PORTAL_APP" --query properties.configuration.ingress.fqdn --output tsv)"
-          recruiter_fqdn="$(az containerapp show --resource-group "$resource_group" --name "$RECRUITER_PORTAL_APP" --query properties.configuration.ingress.fqdn --output tsv)"
-
-          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${api_fqdn}/health"
-          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${public_fqdn}/"
-          curl --fail-with-body --retry 12 --retry-all-errors --retry-delay 10 "https://${recruiter_fqdn}/"

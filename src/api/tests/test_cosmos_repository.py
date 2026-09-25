@@ -1,7 +1,7 @@
 """Focused behavior checks for Cosmos DB Job persistence."""
 
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -48,11 +48,12 @@ class FakeContainer:
 
 
 @pytest.mark.asyncio
-async def test_initialize_creates_database_and_container() -> None:
-    database = AsyncMock()
-    database.create_container_if_not_exists.return_value = FakeContainer()
-    client = AsyncMock()
-    client.create_database_if_not_exists.return_value = database
+async def test_initialize_binds_existing_container_without_creating_resources() -> None:
+    container = AsyncMock()
+    database = MagicMock()
+    database.get_container_client.return_value = container
+    client = MagicMock()
+    client.get_database_client.return_value = database
     repository = CosmosJobRepository.__new__(CosmosJobRepository)
     repository._client = client
     repository._database_name = "recruitment"
@@ -61,11 +62,11 @@ async def test_initialize_creates_database_and_container() -> None:
 
     await repository.initialize()
 
-    client.create_database_if_not_exists.assert_awaited_once_with("recruitment")
-    database.create_container_if_not_exists.assert_awaited_once()
-    arguments = database.create_container_if_not_exists.await_args.kwargs
-    assert arguments["id"] == "jobs"
-    assert arguments["partition_key"]["paths"] == ["/id"]
+    client.get_database_client.assert_called_once_with("recruitment")
+    database.get_container_client.assert_called_once_with("jobs")
+    container.read.assert_awaited_once()
+    assert repository._container is container
+    assert not client.create_database_if_not_exists.called
 
 
 @pytest.mark.asyncio

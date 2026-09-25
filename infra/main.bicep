@@ -20,6 +20,17 @@ param containerAppsSubnetAddressPrefix string = '10.40.0.0/23'
 @description('Private endpoints subnet address range.')
 param privateEndpointsSubnetAddressPrefix string = '10.40.2.0/24'
 
+@description('API container image. When any image is empty, only the shared foundation is deployed.')
+param apiImage string = ''
+
+@description('Public portal container image.')
+param publicPortalImage string = ''
+
+@description('Recruiter portal container image.')
+param recruiterPortalImage string = ''
+
+var deployApps = !empty(apiImage) && !empty(publicPortalImage) && !empty(recruiterPortalImage)
+
 var workloadName = 'recruitment'
 var uniqueToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -40,6 +51,10 @@ var cosmosPrivateDnsZoneName = 'privatelink.documents.azure.com'
 var privateDnsVirtualNetworkLinkName = 'link-${virtualNetworkName}'
 var blobPrivateEndpointName = 'pe-${storageAccountName}-blob'
 var cosmosPrivateEndpointName = 'pe-${cosmosAccountName}-sql'
+var apiIdentityName = 'id-${workloadName}-api-${environmentName}'
+var apiAppName = 'ca-${workloadName}-api-${environmentName}'
+var publicPortalAppName = 'ca-${workloadName}-public-${environmentName}'
+var recruiterPortalAppName = 'ca-${workloadName}-recruiter-${environmentName}'
 
 // The resource group is the lifecycle boundary for the demo environment.
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2025-04-01' = {
@@ -149,6 +164,78 @@ module containerApps './modules/container-apps-environment.bicep' = {
   }
 }
 
+module apiIdentity './modules/user-assigned-identity.bicep' = {
+  scope: resourceGroup
+  params: {
+    location: location
+    name: apiIdentityName
+    tags: tags
+  }
+}
+
+// Granted before the API starts so the first revision can reach Cosmos DB.
+module apiCosmosAccess './modules/cosmos-data-access.bicep' = {
+  scope: resourceGroup
+  params: {
+    accountName: cosmos.outputs.accountName
+    principalId: apiIdentity.outputs.principalId
+  }
+}
+
+module api './modules/container-app.bicep' = if (deployApps) {
+  scope: resourceGroup
+  dependsOn: [
+    apiCosmosAccess
+    cosmosPrivateEndpoint
+  ]
+  params: {
+    name: apiAppName
+    location: location
+    tags: tags
+    environmentId: containerApps.outputs.environmentId
+    image: apiImage
+    targetPort: 8000
+    healthPath: '/health'
+    userAssignedIdentityId: apiIdentity.outputs.id
+    env: [
+      { name: 'AZURE_CLIENT_ID', value: apiIdentity.outputs.clientId }
+      { name: 'AZURE_COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
+      { name: 'AZURE_COSMOS_DATABASE_NAME', value: cosmos.outputs.databaseName }
+      { name: 'AZURE_COSMOS_JOBS_CONTAINER_NAME', value: cosmos.outputs.jobsContainerName }
+    ]
+  }
+}
+
+module publicPortal './modules/container-app.bicep' = if (deployApps) {
+  scope: resourceGroup
+  params: {
+    name: publicPortalAppName
+    location: location
+    tags: tags
+    environmentId: containerApps.outputs.environmentId
+    image: publicPortalImage
+    targetPort: 3000
+    env: [
+      { name: 'API_BASE_URL', value: api!.outputs.url }
+    ]
+  }
+}
+
+module recruiterPortal './modules/container-app.bicep' = if (deployApps) {
+  scope: resourceGroup
+  params: {
+    name: recruiterPortalAppName
+    location: location
+    tags: tags
+    environmentId: containerApps.outputs.environmentId
+    image: recruiterPortalImage
+    targetPort: 3000
+    env: [
+      { name: 'API_BASE_URL', value: api!.outputs.url }
+    ]
+  }
+}
+
 output AZURE_RESOURCE_GROUP string = resourceGroup.name
 output AZURE_LOCATION string = location
 output AZURE_VIRTUAL_NETWORK_NAME string = network.outputs.virtualNetworkName
@@ -171,6 +258,10 @@ output AZURE_BLOB_PRIVATE_DNS_ZONE_NAME string = blobPrivateDns.outputs.privateD
 output AZURE_COSMOS_PRIVATE_DNS_ZONE_NAME string = cosmosPrivateDns.outputs.privateDnsZoneName
 output AZURE_BLOB_PRIVATE_ENDPOINT_ID string = blobPrivateEndpoint.outputs.privateEndpointId
 output AZURE_COSMOS_PRIVATE_ENDPOINT_ID string = cosmosPrivateEndpoint.outputs.privateEndpointId
+output AZURE_API_IDENTITY_CLIENT_ID string = apiIdentity.outputs.clientId
+output API_URL string = deployApps ? api!.outputs.url : ''
+output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
+output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''
 
 @secure()
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.applicationInsightsConnectionString

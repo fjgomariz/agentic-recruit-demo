@@ -4,6 +4,9 @@ param accountName string
 @description('Name of the Cosmos DB SQL database.')
 param databaseName string
 
+@description('Name of the id-partitioned jobs container.')
+param jobsContainerName string = 'jobs'
+
 @description('Azure region for Cosmos DB.')
 param location string
 
@@ -39,7 +42,6 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2026-03-15' = {
   }
 }
 
-// The shared recruitment database starts empty; containers are added with features.
 resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2026-03-15' = {
   parent: account
   name: databaseName
@@ -50,8 +52,26 @@ resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2026-03-15
   }
 }
 
+// Containers are control-plane resources: Entra ID data-plane roles cannot create them at runtime.
+resource jobsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2026-03-15' = {
+  parent: database
+  name: jobsContainerName
+  properties: {
+    resource: {
+      id: jobsContainerName
+      partitionKey: {
+        paths: [
+          '/id'
+        ]
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
 output accountName string = account.name
 output accountId string = account.id
 output databaseName string = database.name
+output jobsContainerName string = jobsContainer.name
 output endpoint string = account.properties.documentEndpoint
 output endpointHostname string = '${account.name}.documents.azure.com'

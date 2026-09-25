@@ -3,7 +3,6 @@
 import logging
 from typing import Any
 
-from azure.cosmos import PartitionKey
 from azure.cosmos.aio import CosmosClient
 from azure.cosmos.exceptions import (
     CosmosHttpResponseError,
@@ -30,14 +29,13 @@ class CosmosJobRepository:
         self._container: Any | None = None
 
     async def initialize(self) -> None:
-        """Create the configured database and jobs container when absent."""
+        """Bind to the provisioned database and jobs container and verify access."""
 
         try:
-            database = await self._client.create_database_if_not_exists(self._database_name)
-            self._container = await database.create_container_if_not_exists(
-                id=self._container_name,
-                partition_key=PartitionKey(path="/id"),
-            )
+            database = self._client.get_database_client(self._database_name)
+            container = database.get_container_client(self._container_name)
+            await container.read()
+            self._container = container
             logger.info(
                 "Cosmos DB Job repository initialized database=%s container=%s",
                 self._database_name,

@@ -1,6 +1,6 @@
 # Continuous deployment
 
-Every pull request validates infrastructure and applications. Every push to `main` runs one deployment job that provisions the Azure foundation with `azd`, publishes immutable container images to GitHub Container Registry, updates the existing development Container Apps, and smoke-tests their endpoints.
+Every pull request validates infrastructure and applications. Every push to `main` publishes commit-tagged container images to GitHub Container Registry and runs a single `azd provision` that deploys the Azure foundation **and** the three Container Apps with those images. Bicep is the only source of truth for the apps: there is no imperative `az containerapp update` step and nothing has to be created by hand.
 
 ## Workflows
 
@@ -8,91 +8,71 @@ Every pull request validates infrastructure and applications. Every push to `mai
 | --- | --- |
 | `validate-infra.yml` | Compiles Bicep and parameter files, parses `azure.yaml`, runs Azure what-if, and rejects resource deletions. |
 | `validate-apps.yml` | Lints and builds both Next.js portals, tests and packages FastAPI, and builds all three container images. |
-| `deploy-dev.yml` | Uses OIDC, provisions with `azd`, publishes commit-tagged images, updates the three existing Container Apps, and smoke-tests them. |
+| `deploy-dev.yml` | Builds and pushes the three images in parallel (with layer cache), then runs `azd provision` with the new image tags and smoke-tests the endpoints. |
 
-Validation jobs fail on the first command error and emit GitHub annotations for missing configuration, destructive infrastructure changes, or invalid deployment targets.
+## How a deployment works
 
-Azure what-if runs for branches in this repository and authenticated dispatches. Fork pull requests still compile Bicep but skip Azure authentication; run what-if after bringing an external contribution onto a trusted branch.
+1. **images** job (matrix of three): `docker/build-push-action` builds `src/<service>/Dockerfile` and pushes `ghcr.io/<owner>/recruitment-foundry-<service>:<sha>`. BuildKit layer cache is stored in the GitHub Actions cache, so unchanged layers are not rebuilt.
+2. **deploy** job: signs in with OIDC, sets `API_IMAGE`, `PUBLIC_PORTAL_IMAGE`, and `RECRUITER_PORTAL_IMAGE` in the azd environment, and runs `azd provision`. `infra/main.parameters.json` maps these values to the Bicep parameters. A new image tag always produces a new Container Apps revision; ARM waits until that revision is healthy (or fails with the platform error).
+3. Smoke tests call `API /health`, `API /jobs`, and both portal home pages. The job summary lists the three URLs.
+4. On failure, the job prints the revision list plus system and console logs of each Container App.
+
+When the three image parameters are empty (for example a local `azd provision` without them), only the shared foundation is deployed and existing apps are left untouched.
+
+## What Bicep deploys for the apps
+
+| App | Port | Probes | Configuration |
+| --- | --- | --- | --- |
+| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor; `AZURE_CLIENT_ID`, `AZURE_COSMOS_ENDPOINT`, `AZURE_COSMOS_DATABASE_NAME`, `AZURE_COSMOS_JOBS_CONTAINER_NAME`. |
+| `ca-recruitment-public-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
+| `ca-recruitment-recruiter-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
+
+The ingress target port, the probe port, and the `PORT` environment variable always come from the same Bicep value, so they cannot drift apart. Each app runs with one minimum replica so revisions activate immediately and the demo stays warm.
+
+The Cosmos DB `jobs` container is provisioned by Bicep. Entra ID data-plane roles cannot create databases or containers, so the API only binds to existing resources. The API connects to Cosmos DB in the background: `/health` answers immediately and job endpoints return `503` until the connection (including RBAC propagation on first deployment) succeeds.
 
 ## One-time GitHub configuration
 
-Create a GitHub environment named `dev`. Configure these environment variables, not secrets:
+Create a GitHub environment named `dev` with these environment variables (not secrets):
 
 | Variable | Purpose |
 | --- | --- |
-| `AZURE_CLIENT_ID` | Application/client ID of the deployment identity. |
+| `AZURE_CLIENT_ID` | Client ID of the deployment identity. |
 | `AZURE_TENANT_ID` | Microsoft Entra tenant ID. |
 | `AZURE_SUBSCRIPTION_ID` | Development Azure subscription ID. |
 | `AZURE_LOCATION` | Deployment region, for example `swedencentral`. |
-| `PUBLIC_PORTAL_CONTAINER_APP_NAME` | Existing public portal Container App name. |
-| `RECRUITER_PORTAL_CONTAINER_APP_NAME` | Existing recruiter portal Container App name. |
-| `API_CONTAINER_APP_NAME` | Existing API Container App name. |
 
-Configure a federated identity credential on the Entra application for the GitHub `dev` environment. Its subject is:
+Configure a federated identity credential on the deployment identity for the GitHub `dev` environment:
 
 ```text
 repo:<owner>/<repository>:environment:dev
 ```
 
-Grant the identity only the Azure control-plane permissions required to deploy the existing Bicep resources and update the three Container Apps. No Azure client secret is required.
+The deployment identity needs **Contributor** on the subscription (the template creates the resource group). Cosmos DB SQL role assignments are Cosmos resources, so no `Microsoft.Authorization` permissions are required. No client secret is used.
 
-The workflows publish to GHCR with the repository-scoped `GITHUB_TOKEN`. Make the three container packages public so Container Apps can pull them without registry credentials:
+Images are published with the repository-scoped `GITHUB_TOKEN`. Keep the three GHCR packages public so Container Apps can pull them without registry credentials:
 
 - `recruitment-foundry-public-portal`
 - `recruitment-foundry-recruiter-portal`
 - `recruitment-foundry-api`
 
-## Existing-resource prerequisite
-
-The current Bicep foundation does not define application Container Apps or a container registry. The three named Container Apps must already exist in the provisioned `cae-recruitment-dev` environment with external ingress enabled. Portal ingress must target port `3000`; API ingress must target port `8000`.
-
-The API Container App must have a system-assigned managed identity with the Cosmos DB Built-in Data Contributor role at the account root scope. These are one-time environment prerequisites rather than work repeated by every demo deployment.
-
-## Runtime configuration
-
-The deployment workflow reads safe values from `azd` outputs. It configures:
-
-- API: `PORT`, `AZURE_COSMOS_ENDPOINT`, `AZURE_COSMOS_DATABASE_NAME`, and `AZURE_COSMOS_JOBS_CONTAINER_NAME`.
-- Portals: `PORT` and `API_BASE_URL`, set to the public HTTPS API endpoint.
-
-Each Container App is updated in a separate workflow step using Azure CLI
-directly. The workflow uses `az containerapp up` so the image and its matching
-ingress target port are applied in the same operation. The CLI operation runs in
-the background while the workflow prints the provisioning state, running state,
-latest revision, and latest ready revision every ten seconds. A failed update
-prints the CLI output and revision list, and each application has a 15-minute
-timeout.
-
-To submit the same API update locally without the opaque Azure CLI spinner:
+## Run a deployment locally
 
 ```powershell
-az containerapp up `
-  --resource-group "rg-recruitment-dev" `
-  --name "ca-recruitment-api-dev" `
-  --environment "cae-recruitment-dev" `
-  --image "ghcr.io/<owner>/recruitment-foundry-api:<tag>" `
-  --ingress external `
-  --target-port 8000 `
-  --env-vars `
-    PORT=8000 `
-    AZURE_COSMOS_ENDPOINT="<endpoint>" `
-    AZURE_COSMOS_DATABASE_NAME=recruitment `
-    AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs
+azd env new dev --subscription <subscription-id> --location swedencentral
+azd env set API_IMAGE ghcr.io/<owner>/recruitment-foundry-api:<sha>
+azd env set PUBLIC_PORTAL_IMAGE ghcr.io/<owner>/recruitment-foundry-public-portal:<sha>
+azd env set RECRUITER_PORTAL_IMAGE ghcr.io/<owner>/recruitment-foundry-recruiter-portal:<sha>
+azd provision
+azd env get-values | Select-String _URL
 ```
 
-Inspect its progress separately:
+Inspect an app:
 
 ```powershell
-az containerapp show `
-  --resource-group "rg-recruitment-dev" `
-  --name "ca-recruitment-api-dev" `
-  --query "{provisioning:properties.provisioningState,running:properties.runningStatus,latest:properties.latestRevisionName,ready:properties.latestReadyRevisionName}" `
-  --output table
-
-az containerapp revision list `
-  --resource-group "rg-recruitment-dev" `
-  --name "ca-recruitment-api-dev" `
-  --output table
+az containerapp revision list -g rg-recruitment-dev -n ca-recruitment-api-dev --all -o table
+az containerapp logs show -g rg-recruitment-dev -n ca-recruitment-api-dev --type system --tail 50
+az containerapp logs show -g rg-recruitment-dev -n ca-recruitment-api-dev --type console --tail 50
 ```
 
 Local templates are committed beside each application as `.env.example` or `.env.local.example`. Keep real `.env` files untracked.

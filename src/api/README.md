@@ -13,7 +13,7 @@ FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persis
 - `app/main.py`: application metadata and router registration.
 - `tests`: focused endpoint behavior checks.
 
-The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repository for jobs and in-memory repositories for candidates and evaluations. On startup, the API creates the configured `recruitment` database and id-partitioned `jobs` container when they are missing. A new empty jobs container is populated with the demo seed jobs.
+The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repository for jobs and in-memory repositories for candidates and evaluations. On startup, the API binds to the `recruitment` database and id-partitioned `jobs` container provisioned by Bicep (Entra ID data-plane roles cannot create them). The Cosmos DB connection is established in the background with retries, so `/health` responds immediately and job endpoints return `503` until storage is reachable. A new empty jobs container is populated with the demo seed jobs.
 
 ## Start locally
 
@@ -22,7 +22,7 @@ Install Python 3.12, Azure CLI, and Azure Developer CLI. Provision the Azure fou
 ```powershell
 azd auth login
 azd env new dev
-azd env set AZURE_LOCATION eastus2
+azd env set AZURE_LOCATION swedencentral
 azd provision
 ```
 

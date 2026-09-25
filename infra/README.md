@@ -6,16 +6,16 @@ This folder contains the Azure Developer CLI (`azd`) and modular Bicep foundatio
 
 ```text
 Internet
-└── Future public Container Apps ingress
+└── Public HTTPS ingress: API (8000), public portal (3000), recruiter portal (3000)
     └── External workload-profiles Container Apps environment
         └── Dedicated VNet integration subnet (/23)
             ├── Blob private endpoint → Storage account
             └── Cosmos SQL private endpoint → Cosmos DB for NoSQL
 ```
 
-The VNet also contains a separate private-endpoints subnet. Private DNS zones for Blob Storage and Cosmos DB are linked to the VNet, so future workloads use the normal service hostnames while data traffic resolves to private endpoint IP addresses. The modules intentionally create only shared platform services; the public portal, recruiter portal, and API are not deployed yet.
+The VNet also contains a separate private-endpoints subnet. Private DNS zones for Blob Storage and Cosmos DB are linked to the VNet, so workloads use the normal service hostnames while data traffic resolves to private endpoint IP addresses. The three Container Apps are deployed by the same template when the `apiImage`, `publicPortalImage`, and `recruiterPortalImage` parameters are set; see [docs/deployment.md](../docs/deployment.md).
 
-The Container Apps environment remains externally accessible and has public network access enabled. Future apps can expose public HTTPS ingress. The environment itself has no private endpoint and is not internal-only.
+The Container Apps environment remains externally accessible and has public network access enabled. The environment itself has no private endpoint and is not internal-only.
 
 ## Resource purposes
 
@@ -26,23 +26,29 @@ The Container Apps environment remains externally accessible and has public netw
 | Application Insights | Workspace-based application telemetry for requests, dependencies, exceptions, and traces. |
 | Virtual network | Contains dedicated Container Apps and private-endpoints subnets without custom routes or network appliances. |
 | Storage account | Standard LRS blob storage for future resumes and generated artifacts. Public network access, public blob access, and shared-key access are disabled. |
-| Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled and the existing `recruitment` database preserved. The API creates the id-partitioned `jobs` container at startup. |
+| Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled, the `recruitment` database, and the id-partitioned `jobs` container. |
 | Private endpoints and DNS | Blob and Cosmos SQL private endpoints plus linked Private DNS zones and Azure-managed DNS records. |
 | Container Apps environment | External workload-profiles environment integrated with the dedicated subnet. Environment logs flow to Log Analytics. |
+| API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account. |
+| Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. Deployed only when image parameters are supplied. |
 
 ## Layout
 
 ```text
 infra/
 ├── main.bicep
+├── main.parameters.json
 ├── modules/
+│   ├── container-app.bicep
 │   ├── container-apps-environment.bicep
+│   ├── cosmos-data-access.bicep
 │   ├── cosmos.bicep
 │   ├── monitoring.bicep
 │   ├── network.bicep
 │   ├── private-dns-zone.bicep
 │   ├── private-endpoint.bicep
-│   └── storage.bicep
+│   ├── storage.bicep
+│   └── user-assigned-identity.bicep
 ├── parameters/
 │   └── dev.bicepparam
 ├── scripts/
@@ -65,11 +71,11 @@ Authenticate and provision a development environment from the repository root:
 ```powershell
 azd auth login
 azd env new dev
-azd env set AZURE_LOCATION eastus2
+azd env set AZURE_LOCATION swedencentral
 azd provision
 ```
 
-`azd` supplies `environmentName` and `location` to the Bicep entry point and stores its outputs in the selected azd environment. Review the generated resource names before using a shared subscription.
+`azd` supplies `environmentName`, `location`, and the optional image parameters to the Bicep entry point through `main.parameters.json` and stores its outputs in the selected azd environment. Review the generated resource names before using a shared subscription.
 
 ## Validate or deploy with Azure CLI
 
@@ -78,15 +84,15 @@ The development parameter file can also be compiled or deployed directly:
 ```powershell
 az bicep build --file infra/main.bicep
 az bicep build-params --file infra/parameters/dev.bicepparam
-az deployment sub what-if --location eastus2 --parameters infra/parameters/dev.bicepparam
-az deployment sub create --name recruitment-foundry-dev --location eastus2 --parameters infra/parameters/dev.bicepparam
+az deployment sub what-if --location swedencentral --parameters infra/parameters/dev.bicepparam
+az deployment sub create --name recruitment-foundry-dev --location swedencentral --parameters infra/parameters/dev.bicepparam
 ```
 
 Use another `.bicepparam` file for each environment. Keep environment names short because they are included in resource names.
 
 ## Replacement impact
 
-Adding an infrastructure subnet to an existing Container Apps environment is not an in-place change. An already deployed non-VNet environment must be deleted and recreated with the same name as a workload-profiles environment. No Container Apps are currently deployed by this template, so the replacement does not remove application workloads. Storage and Cosmos networking changes are applied in place; the VNet, Private DNS zones, links, and private endpoints are new resources.
+Adding an infrastructure subnet to an existing Container Apps environment is not an in-place change. An already deployed non-VNet environment must be deleted and recreated with the same name as a workload-profiles environment, which also removes its Container Apps; the next deployment recreates them. Storage and Cosmos networking changes are applied in place.
 
 Review `az deployment sub what-if` before provisioning an environment that already exists.
 
@@ -102,18 +108,17 @@ After deployment, run the read-only validation script from Bash or WSL:
 
 The script checks external Container Apps environment settings, subnet integration, data-service public access, private endpoint approval, Private DNS links and zone groups, and confirms that no private endpoint targets the Container Apps environment. It uses only Azure CLI read operations.
 
-Private DNS resolution can only be proven from inside the VNet. Run `nslookup` or an equivalent resolver check from a future Container App and confirm that the normal Blob and Cosmos hostnames resolve to private IP addresses. The validation script does not create temporary compute or relax public access.
+Private DNS resolution can only be proven from inside the VNet. Run `nslookup` or an equivalent resolver check from a Container App and confirm that the normal Blob and Cosmos hostnames resolve to private IP addresses. The validation script does not create temporary compute or relax public access.
 
 ## Outputs and authentication
 
-The deployment outputs safe names, hostnames, and resource IDs needed by later modules, including the VNet, both subnets, private endpoints, Private DNS zones, data services, and Container Apps environment. Account keys, Cosmos DB keys, credentials, and data-service connection strings are not exposed.
+The deployment outputs safe names, hostnames, resource IDs, and the three app URLs (`API_URL`, `PUBLIC_PORTAL_URL`, `RECRUITER_PORTAL_URL`). Account keys, Cosmos DB keys, credentials, and data-service connection strings are not exposed.
 
-Future Container Apps should use managed identities. The API identity will need narrowly scoped Cosmos DB data-plane permissions appropriate for its runtime container initialization and item operations. Workloads using Blob Storage will need the relevant Blob data role. Those identities and role assignments are intentionally deferred until the applications are deployed; no broad RBAC grants are created here.
+The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor at the account scope. That role allows item operations only, which is why the `jobs` container is provisioned in Bicep. Workloads using Blob Storage will need the relevant Blob data role when document workflows are added.
 
 ## Future expansion
 
-- Add one Container App module per portal and for the FastAPI service.
-- Add managed identities and least-privilege Blob, Cosmos DB, and monitoring role assignments.
+- Add least-privilege Blob Storage and monitoring role assignments when those features appear.
 - Add Blob containers with explicit retention policies when document workflows are implemented.
 - Revisit the temporary `/id` jobs partition key when production access patterns are finalized.
 - Add diagnostic settings, alerts, dashboards, and availability tests as workloads appear.
