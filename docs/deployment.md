@@ -56,24 +56,28 @@ The deployment workflow reads safe values from `azd` outputs. It configures:
 - Portals: `PORT` and `API_BASE_URL`, set to the public HTTPS API endpoint.
 
 Each Container App is updated in a separate workflow step using Azure CLI
-directly. The update is submitted with `--no-wait`, then the workflow prints the
-provisioning state, running state, latest revision, and latest ready revision
-every ten seconds. A failed update prints the revision list, and each application
-has a 15-minute timeout.
+directly. The workflow uses `az containerapp up` so the image and its matching
+ingress target port are applied in the same operation. The CLI operation runs in
+the background while the workflow prints the provisioning state, running state,
+latest revision, and latest ready revision every ten seconds. A failed update
+prints the CLI output and revision list, and each application has a 15-minute
+timeout.
 
 To submit the same API update locally without the opaque Azure CLI spinner:
 
 ```powershell
-az containerapp update `
+az containerapp up `
   --resource-group "rg-recruitment-dev" `
   --name "ca-recruitment-api-dev" `
+  --environment "cae-recruitment-dev" `
   --image "ghcr.io/<owner>/recruitment-foundry-api:<tag>" `
-  --set-env-vars `
+  --ingress external `
+  --target-port 8000 `
+  --env-vars `
     PORT=8000 `
     AZURE_COSMOS_ENDPOINT="<endpoint>" `
     AZURE_COSMOS_DATABASE_NAME=recruitment `
-    AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs `
-  --no-wait
+    AZURE_COSMOS_JOBS_CONTAINER_NAME=jobs
 ```
 
 Inspect its progress separately:
