@@ -95,7 +95,6 @@ class CosmosJobRepository:
             item = await self._get_container().replace_item(
                 item=entity.id,
                 body=self._serialize(entity),
-                partition_key=entity.id,
             )
             logger.info("Updated Job id=%s", entity.id)
             return Job.model_validate(item)

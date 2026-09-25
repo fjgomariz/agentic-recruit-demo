@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, status
 from app.config import CosmosSettings
 from app.domain import Candidate, CandidateEvaluation, Job
 from app.repositories import CosmosJobRepository, InMemoryRepository
-from app.repositories.seed import create_seed_candidates, create_seed_evaluations, create_seed_jobs
+from app.repositories.seed import create_seed_candidates, create_seed_evaluations
 from app.services import CrudService
 
 logger = logging.getLogger(__name__)
@@ -25,16 +25,12 @@ _evaluation_service = CrudService(InMemoryRepository(create_seed_evaluations()),
 
 
 async def _connect_job_service(settings: CosmosSettings) -> None:
-    """Connect to Cosmos DB and seed an empty jobs container."""
+    """Connect to the Cosmos DB jobs container."""
 
     global _job_repository, _job_service
     repository = CosmosJobRepository(settings)
     try:
         await repository.initialize()
-        if not await repository.list():
-            for job in create_seed_jobs():
-                await repository.create(job)
-            logger.info("Seeded the empty Cosmos DB jobs container")
     except BaseException:
         await repository.close()
         raise

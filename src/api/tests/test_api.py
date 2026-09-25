@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.dependencies.services import get_job_service
 from app.main import app
 from app.repositories import InMemoryRepository
-from app.repositories.seed import create_seed_jobs
+from job_fixtures import create_sample_jobs
 from app.services import CrudService
 
 client = TestClient(app)
@@ -16,7 +16,7 @@ client = TestClient(app)
 def use_in_memory_job_service() -> None:
     """Keep API behavior tests independent of a live Cosmos DB account."""
 
-    service = CrudService(InMemoryRepository(create_seed_jobs()), "Job")
+    service = CrudService(InMemoryRepository(create_sample_jobs()), "Job")
     app.dependency_overrides[get_job_service] = lambda: service
     yield
     app.dependency_overrides.clear()
@@ -57,7 +57,7 @@ def test_candidate_crud_and_error_responses() -> None:
 
 
 def test_job_crud_and_error_responses() -> None:
-    job = create_seed_jobs()[0].model_copy(update={"id": "principal-designer"})
+    job = create_sample_jobs()[0].model_copy(update={"id": "principal-designer"})
     payload = job.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     created = client.post("/jobs", json=payload)

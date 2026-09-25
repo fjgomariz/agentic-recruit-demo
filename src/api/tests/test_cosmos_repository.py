@@ -6,11 +6,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.repositories.cosmos import CosmosJobRepository
-from app.repositories.seed import create_seed_jobs
+from job_fixtures import create_sample_jobs
 
 
 class FakeContainer:
-    """Small async container double matching the Cosmos methods used by the repository."""
+    """Async container double whose methods accept only the arguments the Cosmos SDK honors.
+
+    The SDK forwards unknown keyword arguments to aiohttp, so a lenient fake would hide
+    calls that fail against a real account (for example ``replace_item(partition_key=...)``).
+    """
 
     def __init__(self) -> None:
         self.items: dict[str, dict[str, Any]] = {}
@@ -32,13 +36,8 @@ class FakeContainer:
         self.items[body["id"]] = body.copy()
         return body.copy()
 
-    async def replace_item(
-        self,
-        item: str,
-        body: dict[str, Any],
-        partition_key: str,
-    ) -> dict[str, Any]:
-        assert partition_key == item
+    async def replace_item(self, item: str, body: dict[str, Any]) -> dict[str, Any]:
+        assert body["id"] == item
         self.items[item] = body.copy()
         return body.copy()
 
@@ -74,7 +73,7 @@ async def test_cosmos_job_repository_round_trip() -> None:
     container = FakeContainer()
     repository = CosmosJobRepository.__new__(CosmosJobRepository)
     repository._container = container
-    job = create_seed_jobs()[0].model_copy(update={"id": "cosmos-job"})
+    job = create_sample_jobs()[0].model_copy(update={"id": "cosmos-job"})
 
     created = await repository.create(job)
     assert created == job

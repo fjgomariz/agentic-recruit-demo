@@ -7,13 +7,13 @@ FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persis
 - `app/api`: HTTP routers and error translation.
 - `app/domain`: Pydantic v2 models matching `src/shared/domain`.
 - `app/services`: application-level CRUD behavior.
-- `app/repositories`: persistence contracts, Cosmos DB Job storage, in-memory storage, and shared demo seed records.
+- `app/repositories`: persistence contracts, Cosmos DB Job storage, and in-memory storage with seed records for candidates and evaluations.
 - `app/models`: transport models that are not domain entities.
 - `app/dependencies`: FastAPI dependency providers that compose repositories and services.
 - `app/main.py`: application metadata and router registration.
 - `tests`: focused endpoint behavior checks.
 
-The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repository for jobs and in-memory repositories for candidates and evaluations. On startup, the API binds to the `recruitment` database and id-partitioned `jobs` container provisioned by Bicep (Entra ID data-plane roles cannot create them). The Cosmos DB connection is established in the background with retries, so `/health` responds immediately and job endpoints return `503` until storage is reachable. A new empty jobs container is populated with the demo seed jobs.
+The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repository for jobs and in-memory repositories for candidates and evaluations. On startup, the API binds to the `recruitment` database and id-partitioned `jobs` container provisioned by Bicep (Entra ID data-plane roles cannot create them). The Cosmos DB connection is established in the background with retries, so `/health` responds immediately and job endpoints return `503` until storage is reachable. A new, empty jobs container stays empty: jobs are created through the recruiter portal or `POST /jobs`. The sample jobs in `tests/job_fixtures.py` are test data only.
 
 ## Start locally
 

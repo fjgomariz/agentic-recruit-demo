@@ -10,6 +10,8 @@ from app.api.router import api_router
 from app.dependencies.services import close_job_service, initialize_job_service
 
 logging.basicConfig(level=logging.INFO)
+# The Azure SDK logs every HTTP request and header at INFO, which floods Log Analytics.
+logging.getLogger("azure").setLevel(logging.WARNING)
 
 
 @asynccontextmanager

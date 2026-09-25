@@ -27,3 +27,31 @@ def test_startup_fails_fast_without_cosmos_configuration(monkeypatch: pytest.Mon
     with pytest.raises(RuntimeError, match="AZURE_COSMOS_ENDPOINT"):
         with TestClient(app):
             pass
+
+
+@pytest.mark.asyncio
+async def test_connecting_binds_cosmos_without_writing_seed_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: list[object] = []
+
+    class FakeCosmosJobRepository:
+        def __init__(self, _: object) -> None: ...
+
+        async def initialize(self) -> None: ...
+
+        async def close(self) -> None: ...
+
+        async def list(self) -> list[object]:
+            return []
+
+        async def create(self, job: object) -> object:
+            created.append(job)
+            return job
+
+    monkeypatch.setattr(services, "CosmosJobRepository", FakeCosmosJobRepository)
+
+    await services._connect_job_service(object())
+    try:
+        assert created == []
+        assert await services.get_job_service().list() == []
+    finally:
+        await services.close_job_service()
