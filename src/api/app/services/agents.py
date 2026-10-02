@@ -70,7 +70,9 @@ class JobDescriptionAgentService:
             )
         except Exception as error:
             logger.exception("Job description agent call failed agent=%s", self._agent_name)
-            raise AgentUnavailableError("The job description agent could not be reached") from error
+            status_code = getattr(error, "status_code", None)
+            detail = f" (Foundry returned HTTP {status_code})" if status_code else ""
+            raise AgentUnavailableError(f"The job description agent could not be reached{detail}") from error
 
         try:
             draft = JobDescriptionDraft.model_validate(json.loads(response.output_text))

@@ -29,6 +29,6 @@ The signed-in identity needs **Foundry User** on the project. CI receives it fro
 
 ## Runtime and monitoring
 
-The API (`POST /job-description-drafts`) calls the agent through the Foundry Responses API with its managed identity, which only has **Foundry Project Runtime User**: it can run agents but not change them. The response ID is returned to the recruiter portal and stored on the job as `authoringExecutionId`.
+The API (`POST /job-description-drafts`) calls the agent through the Foundry Responses API with its managed identity, which has **Foundry User** on the project. The narrower **Foundry Project Runtime User** role (`responses/*` only) is not enough: invoking an agent by reference also reads the agent definition and fails with `403`. The response ID is returned to the recruiter portal and stored on the job as `authoringExecutionId`.
 
 The Application Insights connection on the project enables server-side tracing. Each run appears in the Foundry portal (**Agents → Traces**) and in Application Insights as `invoke_agent job-description-writer:<version>` with a child `chat gpt-5.4-mini` span, including token usage. The API also emits its own request, dependency, and log telemetry to the same Application Insights resource.

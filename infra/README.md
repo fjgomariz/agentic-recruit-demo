@@ -29,7 +29,7 @@ The Container Apps environment remains externally accessible and has public netw
 | Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled, the `recruitment` database, and the id-partitioned `jobs` container. |
 | Private endpoints and DNS | Blob and Cosmos SQL private endpoints plus linked Private DNS zones and Azure-managed DNS records. |
 | Container Apps environment | External workload-profiles environment integrated with the dedicated subnet. Environment logs flow to Log Analytics. |
-| API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account and Foundry Project Runtime User on the Foundry project. |
+| API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account and Foundry User on the Foundry project. |
 | Foundry account and project | AI Services account (`aif-…`, keys disabled) with the `proj-recruitment-<env>` project that hosts the prompt agents in `agents/`. The deployment identity gets Foundry User on the project to publish agent versions. |
 | Model deployment | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM by default) used by the agents. Auto-upgrade is disabled. |
 | Application Insights connection | Project connection that enables Foundry server-side agent tracing into the shared Application Insights resource. |

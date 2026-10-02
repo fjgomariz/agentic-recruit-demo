@@ -24,7 +24,7 @@ When the three image parameters are empty (for example a local `azd provision` w
 
 | App | Port | Probes | Configuration |
 | --- | --- | --- | --- |
-| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor and **Foundry Project Runtime User** on the Foundry project; Cosmos settings, `AZURE_AI_PROJECT_ENDPOINT`, `JOB_DESCRIPTION_AGENT_NAME`, and tracing settings. `APPLICATIONINSIGHTS_CONNECTION_STRING` is stored as a Container Apps secret. |
+| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor and **Foundry User** on the Foundry project; Cosmos settings, `AZURE_AI_PROJECT_ENDPOINT`, `JOB_DESCRIPTION_AGENT_NAME`, and tracing settings. `APPLICATIONINSIGHTS_CONNECTION_STRING` is stored as a Container Apps secret. |
 | `ca-recruitment-public-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
 | `ca-recruitment-recruiter-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
 
@@ -52,7 +52,7 @@ repo:<owner>/<repository>:environment:dev
 The deployment identity needs:
 
 - **Contributor** on the subscription (the template creates the resource group).
-- **Role Based Access Control Administrator** on the resource group, with a condition that only allows assigning or removing **Foundry User** (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) and **Foundry Project Runtime User** (`142bfaed-a13f-4c2d-bed2-6db62c4a1009`). Bicep grants the API identity permission to run agents and the deployment identity permission to publish them.
+- **Role Based Access Control Administrator** on the resource group, with a condition that only allows assigning or removing **Foundry User** (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) and **Foundry Project Runtime User** (`142bfaed-a13f-4c2d-bed2-6db62c4a1009`). Bicep grants **Foundry User** on the Foundry project to the API identity (to run agents) and to the deployment identity (to publish them).
 
 Cosmos DB SQL role assignments are Cosmos resources and need no `Microsoft.Authorization` permission. No client secret is used.
 

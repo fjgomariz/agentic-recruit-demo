@@ -79,9 +79,8 @@ var recruiterPortalAppName = 'ca-${workloadName}-recruiter-${environmentName}'
 var foundryAccountName = take('aif-${workloadName}-${environmentName}-${uniqueToken}', 64)
 var foundryProjectName = 'proj-${workloadName}-${environmentName}'
 
-// Built-in Foundry data-plane roles.
+// Built-in Foundry data-plane role.
 var foundryUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
-var foundryProjectRuntimeUserRoleId = '142bfaed-a13f-4c2d-bed2-6db62c4a1009'
 
 // The resource group is the lifecycle boundary for the demo environment.
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2025-04-01' = {
@@ -225,7 +224,8 @@ module foundry './modules/foundry.bicep' = {
   }
 }
 
-// The API only runs existing agents (Responses API); it cannot create or change them.
+// Calling an agent by reference through the project endpoint reads the agent definition, which the
+// narrower Foundry Project Runtime User role (responses/* only) does not allow.
 module apiFoundryAccess './modules/foundry-project-role.bicep' = {
   scope: resourceGroup
   params: {
@@ -233,7 +233,7 @@ module apiFoundryAccess './modules/foundry-project-role.bicep' = {
     projectName: foundry.outputs.projectName
     principalId: apiIdentity.outputs.principalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: foundryProjectRuntimeUserRoleId
+    roleDefinitionId: foundryUserRoleId
   }
 }
 
