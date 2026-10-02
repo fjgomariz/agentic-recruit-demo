@@ -29,6 +29,27 @@ param publicPortalImage string = ''
 @description('Recruiter portal container image.')
 param recruiterPortalImage string = ''
 
+@description('Object ID of the identity running the deployment. It receives Foundry User on the project so it can publish agent versions. Empty skips the assignment.')
+param deploymentPrincipalId string = ''
+
+@description('Foundry model deployment used by the agents.')
+param agentModelDeploymentName string = 'gpt-5.4-mini'
+
+@description('OpenAI model behind the agent model deployment.')
+param agentModelName string = 'gpt-5.4-mini'
+
+@description('OpenAI model version behind the agent model deployment.')
+param agentModelVersion string = '2026-03-17'
+
+@description('Agent model deployment SKU.')
+param agentModelSkuName string = 'GlobalStandard'
+
+@description('Agent model capacity in thousands of tokens per minute.')
+param agentModelCapacity int = 50
+
+@description('Name of the Foundry agent that drafts job descriptions.')
+param jobDescriptionAgentName string = 'job-description-writer'
+
 var deployApps = !empty(apiImage) && !empty(publicPortalImage) && !empty(recruiterPortalImage)
 
 var workloadName = 'recruitment'
@@ -55,6 +76,12 @@ var apiIdentityName = 'id-${workloadName}-api-${environmentName}'
 var apiAppName = 'ca-${workloadName}-api-${environmentName}'
 var publicPortalAppName = 'ca-${workloadName}-public-${environmentName}'
 var recruiterPortalAppName = 'ca-${workloadName}-recruiter-${environmentName}'
+var foundryAccountName = take('aif-${workloadName}-${environmentName}-${uniqueToken}', 64)
+var foundryProjectName = 'proj-${workloadName}-${environmentName}'
+
+// Built-in Foundry data-plane roles.
+var foundryUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
+var foundryProjectRuntimeUserRoleId = '142bfaed-a13f-4c2d-bed2-6db62c4a1009'
 
 // The resource group is the lifecycle boundary for the demo environment.
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2025-04-01' = {
@@ -182,10 +209,50 @@ module apiCosmosAccess './modules/cosmos-data-access.bicep' = {
   }
 }
 
+module foundry './modules/foundry.bicep' = {
+  scope: resourceGroup
+  params: {
+    accountName: foundryAccountName
+    projectName: foundryProjectName
+    location: location
+    tags: tags
+    applicationInsightsName: monitoring.outputs.applicationInsightsName
+    modelDeploymentName: agentModelDeploymentName
+    modelName: agentModelName
+    modelVersion: agentModelVersion
+    modelSkuName: agentModelSkuName
+    modelCapacity: agentModelCapacity
+  }
+}
+
+// The API only runs existing agents (Responses API); it cannot create or change them.
+module apiFoundryAccess './modules/foundry-project-role.bicep' = {
+  scope: resourceGroup
+  params: {
+    accountName: foundry.outputs.accountName
+    projectName: foundry.outputs.projectName
+    principalId: apiIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: foundryProjectRuntimeUserRoleId
+  }
+}
+
+// The deployment identity publishes agent versions after provisioning.
+module deployerFoundryAccess './modules/foundry-project-role.bicep' = if (!empty(deploymentPrincipalId)) {
+  scope: resourceGroup
+  params: {
+    accountName: foundry.outputs.accountName
+    projectName: foundry.outputs.projectName
+    principalId: deploymentPrincipalId
+    roleDefinitionId: foundryUserRoleId
+  }
+}
+
 module api './modules/container-app.bicep' = if (deployApps) {
   scope: resourceGroup
   dependsOn: [
     apiCosmosAccess
+    apiFoundryAccess
     cosmosPrivateEndpoint
   ]
   params: {
@@ -202,7 +269,15 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'AZURE_COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'AZURE_COSMOS_DATABASE_NAME', value: cosmos.outputs.databaseName }
       { name: 'AZURE_COSMOS_JOBS_CONTAINER_NAME', value: cosmos.outputs.jobsContainerName }
+      { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundry.outputs.projectEndpoint }
+      { name: 'JOB_DESCRIPTION_AGENT_NAME', value: jobDescriptionAgentName }
+      { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
+      { name: 'AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING', value: 'true' }
+      { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'true' }
     ]
+    secretEnv: {
+      APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.applicationInsightsConnectionString
+    }
   }
 }
 
@@ -259,6 +334,11 @@ output AZURE_COSMOS_PRIVATE_DNS_ZONE_NAME string = cosmosPrivateDns.outputs.priv
 output AZURE_BLOB_PRIVATE_ENDPOINT_ID string = blobPrivateEndpoint.outputs.privateEndpointId
 output AZURE_COSMOS_PRIVATE_ENDPOINT_ID string = cosmosPrivateEndpoint.outputs.privateEndpointId
 output AZURE_API_IDENTITY_CLIENT_ID string = apiIdentity.outputs.clientId
+output AZURE_AI_ACCOUNT_NAME string = foundry.outputs.accountName
+output AZURE_AI_PROJECT_NAME string = foundry.outputs.projectName
+output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
+output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundry.outputs.modelDeploymentName
+output JOB_DESCRIPTION_AGENT_NAME string = jobDescriptionAgentName
 output API_URL string = deployApps ? api!.outputs.url : ''
 output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
 output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''

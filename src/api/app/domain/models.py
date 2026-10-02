@@ -86,6 +86,40 @@ class Job(DomainModel):
     authoring_execution_id: str | None = None
 
 
+class JobDescriptionRequest(DomainModel):
+    """Role facts and recruiter notes sent to the job description agent."""
+
+    title: str = Field(min_length=1, max_length=120)
+    department: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=120)
+    workplace_type: WorkplaceType | None = None
+    employment_type: EmploymentType | None = None
+    experience_level: ExperienceLevel | None = None
+    hiring_manager: str | None = Field(default=None, max_length=120)
+    notes: str = Field(default="", max_length=4000)
+
+
+class JobDescriptionDraft(DomainModel):
+    """Candidate-facing content proposed by the job description agent."""
+
+    model_config = ConfigDict(alias_generator=lambda value: _to_camel(value), populate_by_name=True, extra="forbid")
+
+    summary: str
+    description: str
+    responsibilities: list[str]
+    qualifications: list[str]
+    preferred_qualifications: list[str]
+
+
+class JobDescriptionDraftResult(DomainModel):
+    """Agent draft plus the traceable identifiers of the agent run that produced it."""
+
+    draft: JobDescriptionDraft
+    execution_id: str
+    agent_name: str
+    agent_version: str | None = None
+
+
 class ApplicationStage(StrEnum):
     """Current workflow stage of an application."""
 

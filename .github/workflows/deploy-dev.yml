@@ -97,7 +97,26 @@ jobs:
           azd env set API_IMAGE "${image_prefix}-api:${GITHUB_SHA}"
           azd env set PUBLIC_PORTAL_IMAGE "${image_prefix}-public-portal:${GITHUB_SHA}"
           azd env set RECRUITER_PORTAL_IMAGE "${image_prefix}-recruiter-portal:${GITHUB_SHA}"
+          # Object ID of the OIDC identity, so Bicep can grant it permission to publish agents.
+          principal_id="$(az account get-access-token --query accessToken --output tsv \
+            | python3 -c 'import base64, json, sys; p = sys.stdin.read().split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["oid"])')"
+          azd env set AZURE_PRINCIPAL_ID "$principal_id"
           azd provision --no-prompt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agents/requirements.txt
+
+      - name: Publish Foundry agents
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet -r agents/requirements.txt
+          AZURE_AI_PROJECT_ENDPOINT="$(azd env get-value AZURE_AI_PROJECT_ENDPOINT)" \
+          AZURE_AI_MODEL_DEPLOYMENT_NAME="$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)" \
+            python agents/deploy.py
 
       - name: Smoke test endpoints
         run: |
@@ -111,6 +130,12 @@ jobs:
           curl --silent --show-error --fail-with-body --retry 60 --retry-all-errors --retry-delay 6 "${api_url}/jobs" --output /dev/null
           curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${public_url}/" --output /dev/null
           curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${recruiter_url}/" --output /dev/null
+
+          # Exercises the API identity's Foundry permissions, which can take minutes to apply on first deploy.
+          curl --silent --show-error --fail-with-body --retry 20 --retry-all-errors --retry-delay 15 --max-time 90 \
+            --header "Content-Type: application/json" \
+            --data '{"title":"Smoke Test Engineer","experienceLevel":"Mid","notes":"Deployment smoke test. Keep it short."}' \
+            "${api_url}/job-description-drafts" | python3 -c 'import json, sys; r = json.load(sys.stdin); print("Agent draft OK:", r["agentName"], "v" + str(r.get("agentVersion")), r["executionId"])'
 
           {
             echo "### Deployed ${GITHUB_SHA::7}"

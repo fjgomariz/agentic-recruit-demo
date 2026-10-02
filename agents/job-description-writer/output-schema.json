@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "description", "responsibilities", "qualifications", "preferredQualifications"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Candidate-facing summary of at most 220 characters."
+    },
+    "description": {
+      "type": "string",
+      "description": "Two or three paragraphs separated by a blank line."
+    },
+    "responsibilities": {
+      "type": "array",
+      "description": "Four to six responsibilities.",
+      "items": { "type": "string" }
+    },
+    "qualifications": {
+      "type": "array",
+      "description": "Four to six required qualifications.",
+      "items": { "type": "string" }
+    },
+    "preferredQualifications": {
+      "type": "array",
+      "description": "Zero to four preferred qualifications.",
+      "items": { "type": "string" }
+    }
+  }
+}

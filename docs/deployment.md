@@ -8,14 +8,15 @@ Every pull request validates infrastructure and applications. Every push to `mai
 | --- | --- |
 | `validate-infra.yml` | Compiles Bicep and parameter files, parses `azure.yaml`, runs Azure what-if, and rejects resource deletions. |
 | `validate-apps.yml` | Lints and builds both Next.js portals, tests and packages FastAPI, and builds all three container images. |
-| `deploy-dev.yml` | Builds and pushes the three images in parallel (with layer cache), then runs `azd provision` with the new image tags and smoke-tests the endpoints. |
+| `deploy-dev.yml` | Builds and pushes the three images in parallel (with layer cache), runs `azd provision` with the new image tags, publishes the Foundry agents, and smoke-tests the endpoints including one agent call. |
 
 ## How a deployment works
 
 1. **images** job (matrix of three): `docker/build-push-action` builds `src/<service>/Dockerfile` and pushes `ghcr.io/<owner>/recruitment-foundry-<service>:<sha>`. BuildKit layer cache is stored in the GitHub Actions cache, so unchanged layers are not rebuilt.
-2. **deploy** job: signs in with OIDC, sets `API_IMAGE`, `PUBLIC_PORTAL_IMAGE`, and `RECRUITER_PORTAL_IMAGE` in the azd environment, and runs `azd provision`. `infra/main.parameters.json` maps these values to the Bicep parameters. A new image tag always produces a new Container Apps revision; ARM waits until that revision is healthy (or fails with the platform error).
-3. Smoke tests call `API /health`, `API /jobs`, and both portal home pages. The job summary lists the three URLs.
-4. On failure, the job prints the revision list plus system and console logs of each Container App.
+2. **deploy** job: signs in with OIDC, sets `API_IMAGE`, `PUBLIC_PORTAL_IMAGE`, `RECRUITER_PORTAL_IMAGE`, and `AZURE_PRINCIPAL_ID` (the OIDC identity's object ID) in the azd environment, and runs `azd provision`. `infra/main.parameters.json` maps these values to the Bicep parameters. A new image tag always produces a new Container Apps revision; ARM waits until that revision is healthy (or fails with the platform error).
+3. `agents/deploy.py` publishes every agent in `agents/` to the Foundry project. A new agent version is created only when its model, instructions, schema, or reasoning settings change.
+4. Smoke tests call `API /health`, `API /jobs`, both portal home pages, and `POST /job-description-drafts`, which runs the agent with the API's managed identity. The job summary lists the three URLs.
+5. On failure, the job prints the revision list plus system and console logs of each Container App.
 
 When the three image parameters are empty (for example a local `azd provision` without them), only the shared foundation is deployed and existing apps are left untouched.
 
@@ -23,7 +24,7 @@ When the three image parameters are empty (for example a local `azd provision` w
 
 | App | Port | Probes | Configuration |
 | --- | --- | --- | --- |
-| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor; `AZURE_CLIENT_ID`, `AZURE_COSMOS_ENDPOINT`, `AZURE_COSMOS_DATABASE_NAME`, `AZURE_COSMOS_JOBS_CONTAINER_NAME`. |
+| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor and **Foundry Project Runtime User** on the Foundry project; Cosmos settings, `AZURE_AI_PROJECT_ENDPOINT`, `JOB_DESCRIPTION_AGENT_NAME`, and tracing settings. `APPLICATIONINSIGHTS_CONNECTION_STRING` is stored as a Container Apps secret. |
 | `ca-recruitment-public-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
 | `ca-recruitment-recruiter-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
 
@@ -48,7 +49,20 @@ Configure a federated identity credential on the deployment identity for the Git
 repo:<owner>/<repository>:environment:dev
 ```
 
-The deployment identity needs **Contributor** on the subscription (the template creates the resource group). Cosmos DB SQL role assignments are Cosmos resources, so no `Microsoft.Authorization` permissions are required. No client secret is used.
+The deployment identity needs:
+
+- **Contributor** on the subscription (the template creates the resource group).
+- **Role Based Access Control Administrator** on the resource group, with a condition that only allows assigning or removing **Foundry User** (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) and **Foundry Project Runtime User** (`142bfaed-a13f-4c2d-bed2-6db62c4a1009`). Bicep grants the API identity permission to run agents and the deployment identity permission to publish them.
+
+Cosmos DB SQL role assignments are Cosmos resources and need no `Microsoft.Authorization` permission. No client secret is used.
+
+```powershell
+$roles = '53ca6127-db72-4b80-b1b0-d745d6d5456d, 142bfaed-a13f-4c2d-bed2-6db62c4a1009'
+$condition = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles}))"
+az role assignment create --assignee-object-id <deployment-identity-object-id> --assignee-principal-type ServicePrincipal `
+  --role "Role Based Access Control Administrator" --scope /subscriptions/<id>/resourceGroups/rg-recruitment-dev `
+  --condition $condition --condition-version 2.0
+```
 
 Images are published with the repository-scoped `GITHUB_TOKEN`. Keep the three GHCR packages public so Container Apps can pull them without registry credentials:
 

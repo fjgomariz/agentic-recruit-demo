@@ -6,7 +6,7 @@ FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persis
 
 - `app/api`: HTTP routers and error translation.
 - `app/domain`: Pydantic v2 models matching `src/shared/domain`.
-- `app/services`: application-level CRUD behavior.
+- `app/services`: application-level CRUD behavior and the Foundry job description agent client.
 - `app/repositories`: persistence contracts, Cosmos DB Job storage, and in-memory storage with seed records for candidates and evaluations.
 - `app/models`: transport models that are not domain entities.
 - `app/dependencies`: FastAPI dependency providers that compose repositories and services.
@@ -76,6 +76,16 @@ Each resource supports collection retrieval, retrieval by ID, creation, and full
 - `/evaluations`
 
 Jobs also support `DELETE /jobs/{job_id}`, which returns `204` when deleted and `404` when the job does not exist. POST returns `409` for a duplicate ID. PUT returns `400` when route and body IDs differ and `404` when the target does not exist.
+
+## AI-assisted authoring
+
+`POST /job-description-drafts` takes role facts (`title` required; `department`, `location`, `workplaceType`, `employmentType`, `experienceLevel`, `hiringManager` optional) and free-form `notes`, runs the Foundry `job-description-writer` agent, and returns `{ draft, executionId, agentName, agentVersion }`. Nothing is persisted. It returns `503` when the agent is not configured or unreachable and `502` when the agent output does not match the expected schema. See [agents/README.md](../../agents/README.md).
+
+| Variable | Required | Default |
+| --- | --- | --- |
+| `AZURE_AI_PROJECT_ENDPOINT` | No; AI features return `503` without it | None |
+| `JOB_DESCRIPTION_AGENT_NAME` | No | `job-description-writer` |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | No; enables Azure Monitor telemetry | None |
 
 ## Cosmos DB environment variables
 

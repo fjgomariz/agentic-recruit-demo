@@ -19,6 +19,14 @@ param targetPort int
 @description('Additional environment variables as name/value pairs.')
 param env array = []
 
+@description('Sensitive environment variables, as a map of variable name to value, stored as Container Apps secrets.')
+@secure()
+param secretEnv object = {}
+
+var secretItems = items(secretEnv)
+var secrets = [for item in secretItems: { name: toLower(replace(item.key, '_', '-')), value: item.value }]
+var secretEnvVars = [for item in secretItems: { name: item.key, secretRef: toLower(replace(item.key, '_', '-')) }]
+
 @description('HTTP path used for readiness and liveness probes. Empty uses TCP probes.')
 param healthPath string = ''
 
@@ -52,6 +60,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      secrets: secrets
       ingress: {
         external: true
         targetPort: targetPort
@@ -68,7 +77,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat([{ name: 'PORT', value: string(targetPort) }], env)
+          env: concat([{ name: 'PORT', value: string(targetPort) }], env, secretEnvVars)
           probes: [
             union(probeTarget, {
               type: 'Startup'

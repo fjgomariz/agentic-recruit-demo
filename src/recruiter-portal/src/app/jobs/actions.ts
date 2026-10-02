@@ -3,8 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import type { Job, JobStatus } from "@domain";
-import { ApiError, createJob, getJob, updateJob } from "@/data/jobs";
+import { ApiError, createJob, draftJobDescription, getJob, updateJob, type JobDescriptionDraftResult, type JobDescriptionRequest } from "@/data/jobs";
 import { createJobId, readJobForm, validateJobForm, type JobFormState } from "@/lib/job-form";
+
+/** Outcome of an AI generation request returned to the job form. */
+export type GenerateDescriptionState = { result: JobDescriptionDraftResult; error?: undefined } | { result?: undefined; error: string };
+
+/** Asks the Foundry job description agent for a draft based on role facts and recruiter notes. */
+export async function generateJobDescription(request: JobDescriptionRequest): Promise<GenerateDescriptionState> {
+  if (!request.title.trim()) return { error: "Add a job title before generating a description." };
+  if (!request.notes.trim()) return { error: "Add a few notes about the role so the agent knows what to write." };
+  try {
+    return { result: await draftJobDescription({ ...request, title: request.title.trim(), notes: request.notes.trim() }) };
+  } catch (error) {
+    if (error instanceof ApiError) return { error: `The AI agent could not generate a description: ${error.message}` };
+    return { error: "The AI agent did not respond in time. Try again." };
+  }
+}
 
 /** Creates a job, or updates the job identified by the hidden `id` field, in Cosmos DB via the API. */
 export async function saveJob(_: JobFormState, formData: FormData): Promise<JobFormState> {

@@ -13,11 +13,13 @@ export const jobFormFields = [
   "employmentType",
   "experienceLevel",
   "hiringManager",
+  "aiNotes",
   "summary",
   "description",
   "responsibilities",
   "qualifications",
   "preferredQualifications",
+  "authoringExecutionId",
 ] as const;
 
 export type JobFormField = (typeof jobFormFields)[number];
@@ -46,6 +48,7 @@ export type JobContent = Pick<
   | "qualifications"
   | "preferredQualifications"
   | "featured"
+  | "authoringExecutionId"
 >;
 
 const requiredFields: JobFormField[] = ["title", "department", "locationDisplayName", "hiringManager", "summary", "description"];
@@ -65,11 +68,13 @@ export function jobToFormValues(job?: Job): JobFormValues {
     employmentType: job?.employmentType ?? "Full-time",
     experienceLevel: job?.experienceLevel ?? "Mid",
     hiringManager: job?.hiringManager ?? "",
+    aiNotes: "",
     summary: job?.summary ?? "",
     description: job?.description ?? "",
     responsibilities: (job?.responsibilities ?? []).join("\n"),
     qualifications: (job?.qualifications ?? []).join("\n"),
     preferredQualifications: (job?.preferredQualifications ?? []).join("\n"),
+    authoringExecutionId: job?.authoringExecutionId ?? "",
     featured: job?.featured ?? false,
   };
 }
@@ -83,7 +88,7 @@ export function readJobForm(formData: FormData): JobFormValues {
 /** Validates form values and converts them to job content. */
 export function validateJobForm(values: JobFormValues): { content?: JobContent; fieldErrors: JobFormErrors } {
   const fieldErrors: JobFormErrors = {};
-  for (const field of requiredFields) if (!values[field]) fieldErrors[field] = "Required";
+  for (const field of requiredFields) if (!values[field]) fieldErrors[field] = field === "description" ? "Required. Write it or generate it with AI" : "Required";
   if (!workplaceTypes.includes(values.workplaceType as WorkplaceType)) fieldErrors.workplaceType = "Choose a workplace type";
   if (!employmentTypes.includes(values.employmentType as EmploymentType)) fieldErrors.employmentType = "Choose an employment type";
   if (!experienceLevels.includes(values.experienceLevel as ExperienceLevel)) fieldErrors.experienceLevel = "Choose an experience level";
@@ -114,6 +119,7 @@ export function validateJobForm(values: JobFormValues): { content?: JobContent; 
       qualifications,
       preferredQualifications: toLines(values.preferredQualifications),
       featured: values.featured,
+      ...(values.authoringExecutionId ? { authoringExecutionId: values.authoringExecutionId } : {}),
     },
   };
 }

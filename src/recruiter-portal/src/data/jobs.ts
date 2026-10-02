@@ -60,3 +60,39 @@ export async function updateJob(job: Job): Promise<Job> {
   if (!response.ok) throw await readError(response, `Failed to update Job '${job.id}': ${response.status}`);
   return (await response.json()) as Job;
 }
+
+/** Role facts and recruiter notes sent to the job description agent. */
+export interface JobDescriptionRequest {
+  title: string;
+  department?: string;
+  location?: string;
+  workplaceType?: string;
+  employmentType?: string;
+  experienceLevel?: string;
+  hiringManager?: string;
+  notes: string;
+}
+
+/** Candidate-facing job content proposed by the agent. */
+export type JobDescriptionDraft = Pick<Job, "summary" | "description" | "responsibilities" | "qualifications" | "preferredQualifications">;
+
+/** Agent draft plus the identifier of the Foundry response that produced it. */
+export interface JobDescriptionDraftResult {
+  draft: JobDescriptionDraft;
+  executionId: string;
+  agentName: string;
+  agentVersion?: string | null;
+}
+
+/** Asks the Foundry job description agent, through the API, for a draft posting. */
+export async function draftJobDescription(request: JobDescriptionRequest): Promise<JobDescriptionDraftResult> {
+  const response = await fetch(`${apiBaseUrl}/job-description-drafts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    cache: "no-store",
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!response.ok) throw await readError(response, `Failed to generate a job description: ${response.status}`);
+  return (await response.json()) as JobDescriptionDraftResult;
+}

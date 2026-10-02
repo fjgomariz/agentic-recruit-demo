@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/**"
+      - "agents/**"
       - ".dockerignore"
       - ".github/workflows/validate-apps.yml"
   workflow_dispatch:

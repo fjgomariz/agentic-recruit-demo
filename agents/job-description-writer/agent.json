@@ -1,0 +1,8 @@
+{
+  "name": "job-description-writer",
+  "description": "Drafts a complete, candidate-facing job posting from a few role facts and recruiter notes.",
+  "instructionsFile": "instructions.md",
+  "outputSchemaFile": "output-schema.json",
+  "outputSchemaName": "job_description_draft",
+  "reasoningEffort": "low"
+}

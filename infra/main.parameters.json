@@ -16,6 +16,9 @@
     },
     "recruiterPortalImage": {
       "value": "${RECRUITER_PORTAL_IMAGE=}"
+    },
+    "deploymentPrincipalId": {
+      "value": "${AZURE_PRINCIPAL_ID=}"
     }
   }
 }
