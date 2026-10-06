@@ -6,7 +6,8 @@ FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persis
 
 - `app/api`: HTTP routers and error translation.
 - `app/domain`: Pydantic v2 models matching `src/shared/domain`.
-- `app/services`: application-level CRUD behavior and the Foundry job description agent client.
+- `app/services`: application-level CRUD behavior, the candidate application workflow, and the Foundry job description agent client.
+- `app/storage`: Blob Storage access for uploaded resumes.
 - `app/repositories`: persistence contracts, Cosmos DB Job storage, and in-memory storage with seed records for candidates and evaluations.
 - `app/models`: transport models that are not domain entities.
 - `app/dependencies`: FastAPI dependency providers that compose repositories and services.
@@ -77,6 +78,17 @@ Each resource supports collection retrieval, retrieval by ID, creation, and full
 
 Jobs also support `DELETE /jobs/{job_id}`, which returns `204` when deleted and `404` when the job does not exist. POST returns `409` for a duplicate ID. PUT returns `400` when route and body IDs differ and `404` when the target does not exist.
 
+## Candidate applications
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /jobs/{job_id}/applications` | Multipart form with `candidateName`, `candidateEmail`, optional `message`, and `resume` (PDF, 5 MB max). Uploads the resume to the `resumes` blob container as `<applicationId>.pdf`, stores the application in the Cosmos DB `applications` container, increments the job's `applicantCount`, and returns `201`. Returns `404` for an unknown job and `400` when the job is not `Published` or the file is empty, too large, or not a PDF (checked by content, not extension). |
+| `GET /jobs/{job_id}/applications` | Applications for a job, newest first. |
+| `GET /applications/{application_id}` | One application. |
+| `GET /applications/{application_id}/resume` | The stored PDF as an attachment with the original file name. |
+
+An application stores `id`, `jobId`, `candidateName`, `candidateEmail`, `message`, `resumeFileName`, `resumeBlobPath` (`resumes/<id>.pdf`), and `submittedAt`. If the Cosmos DB write fails, the uploaded blob is deleted.
+
 ## AI-assisted authoring
 
 `POST /job-description-drafts` takes role facts (`title` required; `department`, `location`, `workplaceType`, `employmentType`, `experienceLevel`, `hiringManager` optional) and free-form `notes`, runs the Foundry `job-description-writer` agent, and returns `{ draft, executionId, agentName, agentVersion }`. Nothing is persisted. It returns `503` when the agent is not configured or unreachable and `502` when the agent output does not match the expected schema. See [agents/README.md](../../agents/README.md).
@@ -95,3 +107,13 @@ Jobs also support `DELETE /jobs/{job_id}`, which returns `204` when deleted and 
 | `AZURE_COSMOS_KEY` | No | `DefaultAzureCredential`; account keys may be disabled |
 | `AZURE_COSMOS_DATABASE_NAME` | No | `recruitment` |
 | `AZURE_COSMOS_JOBS_CONTAINER_NAME` | No | `jobs` |
+| `AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME` | No | `applications` |
+
+## Blob Storage environment variables
+
+| Variable | Required | Default |
+| --- | --- | --- |
+| `AZURE_STORAGE_BLOB_ENDPOINT` | No; application endpoints return `503` without it | None |
+| `AZURE_STORAGE_RESUMES_CONTAINER_NAME` | No | `resumes` |
+
+The storage account only accepts private-endpoint traffic with Entra ID, so resume upload and download work from the deployed API, not from a developer machine.

@@ -34,6 +34,8 @@ async def test_connecting_binds_cosmos_without_writing_seed_jobs(monkeypatch: py
     created: list[object] = []
 
     class FakeCosmosJobRepository:
+        client = object()
+
         def __init__(self, _: object) -> None: ...
 
         async def initialize(self) -> None: ...
@@ -47,7 +49,14 @@ async def test_connecting_binds_cosmos_without_writing_seed_jobs(monkeypatch: py
             created.append(job)
             return job
 
+    class FakeCosmosApplicationRepository:
+        def __init__(self, client: object, _: object) -> None:
+            assert client is FakeCosmosJobRepository.client
+
+        async def initialize(self) -> None: ...
+
     monkeypatch.setattr(services, "CosmosJobRepository", FakeCosmosJobRepository)
+    monkeypatch.setattr(services, "CosmosApplicationRepository", FakeCosmosApplicationRepository)
 
     await services._connect_job_service(object())
     try:

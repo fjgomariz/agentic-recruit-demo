@@ -25,11 +25,11 @@ The Container Apps environment remains externally accessible and has public netw
 | Log Analytics workspace | Central destination for platform logs, diagnostics, and future agent observability. |
 | Application Insights | Workspace-based application telemetry for requests, dependencies, exceptions, and traces. |
 | Virtual network | Contains dedicated Container Apps and private-endpoints subnets without custom routes or network appliances. |
-| Storage account | Standard LRS blob storage for future resumes and generated artifacts. Public network access, public blob access, and shared-key access are disabled. |
-| Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled, the `recruitment` database, and the id-partitioned `jobs` container. |
+| Storage account | Standard LRS blob storage with the private `resumes` container for candidate resumes. Public network access, public blob access, and shared-key access are disabled. |
+| Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled, the `recruitment` database, the id-partitioned `jobs` container, and the `applications` container partitioned by `/jobId`. |
 | Private endpoints and DNS | Blob and Cosmos SQL private endpoints plus linked Private DNS zones and Azure-managed DNS records. |
 | Container Apps environment | External workload-profiles environment integrated with the dedicated subnet. Environment logs flow to Log Analytics. |
-| API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account and Foundry User on the Foundry project. |
+| API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account, Storage Blob Data Contributor on the `resumes` container, and Foundry User on the Foundry project. |
 | Foundry account and project | AI Services account (`aif-…`, keys disabled) with the `proj-recruitment-<env>` project that hosts the prompt agents in `agents/`. The deployment identity gets Foundry User on the project to publish agent versions. |
 | Model deployment | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM by default) used by the agents. Auto-upgrade is disabled. |
 | Application Insights connection | Project connection that enables Foundry server-side agent tracing into the shared Application Insights resource. |
@@ -42,6 +42,7 @@ infra/
 ├── main.bicep
 ├── main.parameters.json
 ├── modules/
+│   ├── blob-container-access.bicep
 │   ├── container-app.bicep
 │   ├── container-apps-environment.bicep
 │   ├── cosmos-data-access.bicep
@@ -119,12 +120,12 @@ Private DNS resolution can only be proven from inside the VNet. Run `nslookup` o
 
 The deployment outputs safe names, hostnames, resource IDs, and the three app URLs (`API_URL`, `PUBLIC_PORTAL_URL`, `RECRUITER_PORTAL_URL`). Account keys, Cosmos DB keys, credentials, and data-service connection strings are not exposed.
 
-The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor at the account scope. That role allows item operations only, which is why the `jobs` container is provisioned in Bicep. Workloads using Blob Storage will need the relevant Blob data role when document workflows are added.
+The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor at the account scope. That role allows item operations only, which is why the `jobs` and `applications` containers are provisioned in Bicep. The identity also has Storage Blob Data Contributor scoped to the `resumes` container only.
 
 ## Future expansion
 
-- Add least-privilege Blob Storage and monitoring role assignments when those features appear.
-- Add Blob containers with explicit retention policies when document workflows are implemented.
+- Add least-privilege monitoring role assignments when those features appear.
+- Add explicit retention policies for resumes and other generated documents.
 - Revisit the temporary `/id` jobs partition key when production access patterns are finalized.
 - Add diagnostic settings, alerts, dashboards, and availability tests as workloads appear.
 - Add Azure AI Foundry resources, model deployments, and agent tracing after model and regional capacity requirements are known.

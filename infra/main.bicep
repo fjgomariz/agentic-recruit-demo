@@ -208,6 +208,16 @@ module apiCosmosAccess './modules/cosmos-data-access.bicep' = {
   }
 }
 
+// The API uploads and downloads resumes in the private resumes container only.
+module apiResumesAccess './modules/blob-container-access.bicep' = {
+  scope: resourceGroup
+  params: {
+    storageAccountName: storage.outputs.storageAccountName
+    containerName: storage.outputs.resumesContainerName
+    principalId: apiIdentity.outputs.principalId
+  }
+}
+
 module foundry './modules/foundry.bicep' = {
   scope: resourceGroup
   params: {
@@ -253,6 +263,8 @@ module api './modules/container-app.bicep' = if (deployApps) {
   dependsOn: [
     apiCosmosAccess
     apiFoundryAccess
+    apiResumesAccess
+    blobPrivateEndpoint
     cosmosPrivateEndpoint
   ]
   params: {
@@ -269,6 +281,9 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'AZURE_COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'AZURE_COSMOS_DATABASE_NAME', value: cosmos.outputs.databaseName }
       { name: 'AZURE_COSMOS_JOBS_CONTAINER_NAME', value: cosmos.outputs.jobsContainerName }
+      { name: 'AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME', value: cosmos.outputs.applicationsContainerName }
+      { name: 'AZURE_STORAGE_BLOB_ENDPOINT', value: storage.outputs.blobEndpoint }
+      { name: 'AZURE_STORAGE_RESUMES_CONTAINER_NAME', value: storage.outputs.resumesContainerName }
       { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundry.outputs.projectEndpoint }
       { name: 'JOB_DESCRIPTION_AGENT_NAME', value: jobDescriptionAgentName }
       { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
@@ -324,6 +339,8 @@ output AZURE_STORAGE_BLOB_ENDPOINT string = storage.outputs.blobEndpoint
 output AZURE_STORAGE_BLOB_HOSTNAME string = storage.outputs.blobHostname
 output AZURE_COSMOS_ACCOUNT_NAME string = cosmos.outputs.accountName
 output AZURE_COSMOS_DATABASE_NAME string = cosmos.outputs.databaseName
+output AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME string = cosmos.outputs.applicationsContainerName
+output AZURE_STORAGE_RESUMES_CONTAINER_NAME string = storage.outputs.resumesContainerName
 output AZURE_COSMOS_ENDPOINT string = cosmos.outputs.endpoint
 output AZURE_COSMOS_ENDPOINT_HOSTNAME string = cosmos.outputs.endpointHostname
 output AZURE_CONTAINER_APPS_ENVIRONMENT_NAME string = containerApps.outputs.environmentName

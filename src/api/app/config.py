@@ -11,6 +11,7 @@ class CosmosSettings:
     endpoint: str
     database_name: str = "recruitment"
     jobs_container_name: str = "jobs"
+    applications_container_name: str = "applications"
     key: str | None = None
 
     @classmethod
@@ -24,7 +25,25 @@ class CosmosSettings:
             endpoint=endpoint,
             database_name=os.getenv("AZURE_COSMOS_DATABASE_NAME", "recruitment"),
             jobs_container_name=os.getenv("AZURE_COSMOS_JOBS_CONTAINER_NAME", "jobs"),
+            applications_container_name=os.getenv("AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME", "applications"),
             key=os.getenv("AZURE_COSMOS_KEY"),
+        )
+
+
+@dataclass(frozen=True)
+class StorageSettings:
+    """Blob Storage settings for uploaded resumes."""
+
+    blob_endpoint: str | None
+    resumes_container_name: str = "resumes"
+
+    @classmethod
+    def from_environment(cls) -> "StorageSettings":
+        """Load storage settings; a missing endpoint disables resume upload instead of failing startup."""
+
+        return cls(
+            blob_endpoint=os.getenv("AZURE_STORAGE_BLOB_ENDPOINT") or None,
+            resumes_container_name=os.getenv("AZURE_STORAGE_RESUMES_CONTAINER_NAME", "resumes"),
         )
 
 

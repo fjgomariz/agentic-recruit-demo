@@ -86,6 +86,19 @@ class Job(DomainModel):
     authoring_execution_id: str | None = None
 
 
+class JobApplication(DomainModel):
+    """Candidate application to one job, with the resume stored in Blob Storage."""
+
+    id: str
+    job_id: str
+    candidate_name: str = Field(min_length=1, max_length=120)
+    candidate_email: str = Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    message: str = Field(default="", max_length=2000)
+    resume_file_name: str
+    resume_blob_path: str
+    submitted_at: datetime
+
+
 class JobDescriptionRequest(DomainModel):
     """Role facts and recruiter notes sent to the job description agent."""
 

@@ -4,3 +4,4 @@ export * from "./approval";
 export * from "./candidate";
 export * from "./evaluation";
 export * from "./job";
+export * from "./job-application";

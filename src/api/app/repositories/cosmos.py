@@ -1,4 +1,4 @@
-"""Azure Cosmos DB persistence for Job entities."""
+"""Azure Cosmos DB persistence for jobs and candidate applications."""
 
 import logging
 from typing import Any
@@ -12,7 +12,7 @@ from azure.cosmos.exceptions import (
 from azure.identity.aio import DefaultAzureCredential
 
 from app.config import CosmosSettings
-from app.domain import Job
+from app.domain import Job, JobApplication
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,67 @@ class CosmosJobRepository:
             raise RuntimeError("CosmosJobRepository.initialize() must be called before use")
         return self._container
 
+    @property
+    def client(self) -> CosmosClient:
+        """Cosmos DB client shared with other repositories on the same account."""
+
+        return self._client
+
     @staticmethod
     def _serialize(entity: Job) -> dict[str, Any]:
         return entity.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+class CosmosApplicationRepository:
+    """Persist candidate applications in the job-partitioned applications container.
+
+    The repository borrows a Cosmos client owned by another repository and never closes it.
+    """
+
+    def __init__(self, client: CosmosClient, settings: CosmosSettings) -> None:
+        self._client = client
+        self._database_name = settings.database_name
+        self._container_name = settings.applications_container_name
+        self._container: Any | None = None
+
+    async def initialize(self) -> None:
+        """Bind to the provisioned applications container and verify access."""
+
+        container = self._client.get_database_client(self._database_name).get_container_client(self._container_name)
+        await container.read()
+        self._container = container
+        logger.info("Cosmos DB application repository initialized container=%s", self._container_name)
+
+    async def create(self, application: JobApplication) -> JobApplication:
+        """Store a new application."""
+
+        body = application.model_dump(mode="json", by_alias=True, exclude_none=True)
+        item = await self._get_container().create_item(body=body)
+        logger.info("Created application id=%s job=%s", application.id, application.job_id)
+        return JobApplication.model_validate(item)
+
+    async def list_for_job(self, job_id: str) -> list[JobApplication]:
+        """Return a job's applications, newest first."""
+
+        items = self._get_container().query_items(
+            query="SELECT * FROM c WHERE c.jobId = @jobId ORDER BY c.submittedAt DESC",
+            parameters=[{"name": "@jobId", "value": job_id}],
+            partition_key=job_id,
+        )
+        return [JobApplication.model_validate(item) async for item in items]
+
+    async def get(self, application_id: str) -> JobApplication | None:
+        """Return one application by identifier, searching across jobs."""
+
+        items = self._get_container().query_items(
+            query="SELECT * FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": application_id}],
+        )
+        async for item in items:
+            return JobApplication.model_validate(item)
+        return None
+
+    def _get_container(self) -> Any:
+        if self._container is None:
+            raise RuntimeError("CosmosApplicationRepository.initialize() must be called before use")
+        return self._container
