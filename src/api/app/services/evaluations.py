@@ -12,7 +12,7 @@ from app.domain import (
     EvaluationStatus,
     JobApplication,
 )
-from app.services.agents import AgentContentBlockedError, AgentUnavailableError, CandidateEvaluationAgentService
+from app.services.agents import AgentInputRejectedError, AgentUnavailableError, CandidateEvaluationAgentService
 from app.services.applications import ApplicationService
 
 logger = logging.getLogger(__name__)
@@ -93,13 +93,13 @@ class EvaluationService:
                     for index, item in enumerate(output.criteria, start=1)
                 ],
             )
-        except AgentContentBlockedError as error:
+        except AgentInputRejectedError as error:
             evaluation = ApplicationEvaluation(
                 **base,
                 status=EvaluationStatus.NEEDS_REVIEW,
                 recommendation=EvaluationRecommendation.NEEDS_MANUAL_REVIEW,
                 summary=f"{error}. The resume was not scored automatically; review it manually.",
-                considerations=["The resume appears to contain instructions aimed at automated screening."],
+                considerations=[error.consideration],
                 error_message=str(error),
             )
         except Exception as error:

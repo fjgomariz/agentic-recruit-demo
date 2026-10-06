@@ -35,8 +35,13 @@ class AgentResponseError(RuntimeError):
     """Raised when the agent answers with content that does not match the expected schema."""
 
 
-class AgentContentBlockedError(RuntimeError):
-    """Raised when Azure AI Content Safety blocks the request, for example a prompt injection in a resume."""
+class AgentInputRejectedError(RuntimeError):
+    """Raised when Foundry rejects the input itself: a Content Safety block (for example a prompt
+    injection in a resume) or a file the model cannot read. These need a human, not a retry."""
+
+    def __init__(self, reason: str, consideration: str) -> None:
+        super().__init__(reason)
+        self.consideration = consideration
 
 
 class ResponsesClient(Protocol):
@@ -123,15 +128,24 @@ def _agent_version(response: Any) -> str | None:
     return getattr(agent, "version", None)
 
 
-def _content_filter_reason(error: Exception) -> str | None:
-    """Return a readable reason when Azure AI Content Safety blocked the request, otherwise None."""
+def _rejected_input(error: Exception) -> AgentInputRejectedError | None:
+    """Classify Foundry errors caused by the input itself; anything else is an availability problem."""
 
-    if getattr(error, "code", None) != "content_filter":
-        return None
-    text = json.dumps(getattr(error, "body", None) or {}, default=str)
-    if '"jailbreak": {"detected": true' in text or '"indirect_attack": {"detected": true' in text:
-        return "Azure AI Content Safety detected a prompt injection attempt"
-    return "Azure AI Content Safety blocked the request"
+    code = getattr(error, "code", None)
+    if code == "content_filter":
+        text = json.dumps(getattr(error, "body", None) or {}, default=str)
+        if '"jailbreak": {"detected": true' in text or '"indirect_attack": {"detected": true' in text:
+            return AgentInputRejectedError(
+                "Azure AI Content Safety detected a prompt injection attempt",
+                "The resume appears to contain instructions aimed at automated screening.",
+            )
+        return AgentInputRejectedError("Azure AI Content Safety blocked the request", "The resume content was blocked by Azure AI Content Safety.")
+    if code == "invalid_file":
+        return AgentInputRejectedError(
+            "The resume PDF could not be read by the model",
+            "The PDF may be scanned, damaged, or empty. Open it manually or ask the candidate for another copy.",
+        )
+    return None
 
 
 class FoundryAgent:
@@ -160,20 +174,20 @@ class FoundryAgent:
             )
         except Exception as error:
             duration_ms = int((time.perf_counter() - start) * 1000)
-            blocked = _content_filter_reason(error)
+            rejected = _rejected_input(error)
             status_code = getattr(error, "status_code", None)
-            message = blocked or f"Foundry call failed{f' with HTTP {status_code}' if status_code else ''}"
-            logger.warning("Agent call failed agent=%s reason=%s", self.agent_name, message, exc_info=not blocked)
+            message = str(rejected) if rejected else f"Foundry call failed{f' with HTTP {status_code}' if status_code else ''}: {type(error).__name__}"
+            logger.warning("Agent call failed agent=%s reason=%s", self.agent_name, message, exc_info=rejected is None)
             await self._record(
                 id=f"failed-{uuid.uuid4().hex}",
-                status=AgentExecutionStatus.NEEDS_REVIEW if blocked else AgentExecutionStatus.FAILED,
+                status=AgentExecutionStatus.NEEDS_REVIEW if rejected else AgentExecutionStatus.FAILED,
                 started_at=started_at,
                 duration_ms=duration_ms,
                 related_entity_ids=related_entity_ids,
                 error_message=message,
             )
-            if blocked:
-                raise AgentContentBlockedError(blocked) from error
+            if rejected:
+                raise rejected from error
             raise AgentUnavailableError(f"The {self.agent_name} agent could not be reached{f' (Foundry returned HTTP {status_code})' if status_code else ''}") from error
 
         usage = getattr(response, "usage", None)
@@ -257,7 +271,7 @@ class JobDescriptionAgentService:
     async def generate(self, request: JobDescriptionRequest) -> JobDescriptionDraftResult:
         try:
             response, run = await self._agent.run(build_agent_input(request), related_entity_ids=[])
-        except AgentContentBlockedError as error:
+        except AgentInputRejectedError as error:
             raise AgentUnavailableError(f"The job description agent refused the request: {error}") from error
 
         try:

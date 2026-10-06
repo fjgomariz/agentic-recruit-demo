@@ -17,19 +17,18 @@ logging.getLogger("azure").setLevel(logging.WARNING)
 
 
 def configure_telemetry() -> None:
-    """Send requests, dependencies, logs, and agent call spans to Application Insights when configured."""
+    """Send requests, dependencies, and logs to Application Insights when configured.
+
+    Agent runs are traced server-side by Foundry through the project's Application Insights connection.
+    The azure-ai-projects client-side instrumentor is deliberately not enabled: in 2.7.0 it raises
+    AttributeError on sampled-out (non-recording) spans and fails the agent call itself.
+    """
 
     if not os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         return
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor(logger_name="app")
-    try:
-        from azure.ai.projects.telemetry import AIProjectInstrumentor
-
-        AIProjectInstrumentor().instrument()
-    except Exception:
-        logging.getLogger(__name__).exception("Foundry client tracing could not be enabled")
 
 
 configure_telemetry()

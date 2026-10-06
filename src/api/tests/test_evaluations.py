@@ -118,6 +118,32 @@ async def test_prompt_injection_blocked_by_content_safety_needs_manual_review() 
 
 
 @pytest.mark.asyncio
+async def test_unreadable_pdf_needs_manual_review() -> None:
+    class InvalidFileError(Exception):
+        code = "invalid_file"
+        status_code = 400
+        body = {"message": "The file you uploaded is badly formatted or corrupted."}
+
+    evaluations, service, recorder, _ = make_evaluation(FakeResponses(error=InvalidFileError("bad pdf")))
+    application = await submit(service)
+
+    await evaluations.start_and_run(application.id)
+
+    evaluation = (await service.get(application.id)).evaluation
+    assert evaluation.status == EvaluationStatus.NEEDS_REVIEW
+    assert evaluation.recommendation == EvaluationRecommendation.NEEDS_MANUAL_REVIEW
+    assert "could not be read" in evaluation.summary and "scanned" in evaluation.considerations[0]
+    assert recorder.executions[0].status == AgentExecutionStatus.NEEDS_REVIEW
+
+
+def test_sdk_client_instrumentor_is_not_enabled() -> None:
+    """azure-ai-projects 2.7.0's instrumentor fails agent calls on non-recording spans."""
+
+    source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+    assert "AIProjectInstrumentor()" not in source
+
+
+@pytest.mark.asyncio
 async def test_invalid_output_marks_evaluation_failed() -> None:
     evaluations, service, recorder, _ = make_evaluation(FakeResponses(output_text='{"overallScore": 50}'))
     application = await submit(service)

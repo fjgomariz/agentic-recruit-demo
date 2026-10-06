@@ -1,7 +1,7 @@
 """Application services coordinating domain operations."""
 
 from .agents import (
-    AgentContentBlockedError,
+    AgentInputRejectedError,
     AgentResponseError,
     AgentUnavailableError,
     CandidateEvaluationAgentService,
@@ -12,7 +12,7 @@ from .crud import CrudService, EntityAlreadyExistsError, EntityNotFoundError
 from .evaluations import EvaluationInProgressError, EvaluationService
 
 __all__ = [
-    "AgentContentBlockedError",
+    "AgentInputRejectedError",
     "AgentResponseError",
     "AgentUnavailableError",
     "ApplicationNotAllowedError",

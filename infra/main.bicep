@@ -293,9 +293,6 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'CANDIDATE_EVALUATION_AGENT_NAME', value: candidateEvaluationAgentName }
       { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundry.outputs.modelDeploymentName }
       { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
-      { name: 'AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING', value: 'true' }
-      // Resumes are sent to the evaluator as PDFs; keep candidate content out of client-side traces.
-      { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'false' }
     ]
     secretEnv: {
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.applicationInsightsConnectionString
