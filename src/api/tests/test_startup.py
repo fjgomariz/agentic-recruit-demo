@@ -18,7 +18,7 @@ def test_api_stays_healthy_while_cosmos_is_unavailable(monkeypatch: pytest.Monke
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/jobs").status_code == 503
-        assert client.get("/candidates").status_code == 200
+        assert client.get("/applications").status_code == 503
 
 
 def test_startup_fails_fast_without_cosmos_configuration(monkeypatch: pytest.MonkeyPatch) -> None:

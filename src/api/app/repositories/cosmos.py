@@ -171,6 +171,13 @@ class CosmosApplicationRepository:
         )
         return [JobApplication.model_validate(item) async for item in items]
 
+    async def list_all(self) -> list[JobApplication]:
+        """Return every application across jobs, newest first (sorted in memory; demo-scale data)."""
+
+        items = self._get_container().query_items(query="SELECT * FROM c")
+        applications = [JobApplication.model_validate(item) async for item in items]
+        return sorted(applications, key=lambda application: application.submitted_at, reverse=True)
+
     async def get(self, application_id: str) -> JobApplication | None:
         """Return one application by identifier, searching across jobs."""
 

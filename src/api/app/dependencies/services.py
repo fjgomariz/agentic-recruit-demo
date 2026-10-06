@@ -8,9 +8,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 
 from app.config import CosmosSettings, StorageSettings
-from app.domain import Candidate, CandidateEvaluation, Job
-from app.repositories import CosmosApplicationRepository, CosmosJobRepository, InMemoryRepository
-from app.repositories.seed import create_seed_candidates, create_seed_evaluations
+from app.domain import Job
+from app.repositories import CosmosApplicationRepository, CosmosJobRepository
 from app.services import ApplicationService, CrudService
 from app.storage import BlobResumeStore
 
@@ -23,8 +22,6 @@ _job_service: CrudService[Job] | None = None
 _application_repository: CosmosApplicationRepository | None = None
 _resume_store: BlobResumeStore | None = None
 _job_service_task: asyncio.Task[None] | None = None
-_candidate_service = CrudService(InMemoryRepository(create_seed_candidates()), "Candidate")
-_evaluation_service = CrudService(InMemoryRepository(create_seed_evaluations()), "Evaluation")
 
 
 async def _connect_job_service(settings: CosmosSettings) -> None:
@@ -109,19 +106,5 @@ def get_application_service(jobs: Annotated[CrudService[Job], Depends(get_job_se
     return ApplicationService(jobs, _application_repository, _resume_store)
 
 
-def get_candidate_service() -> CrudService[Candidate]:
-    """Provide the application-scoped candidate service."""
-
-    return _candidate_service
-
-
-def get_evaluation_service() -> CrudService[CandidateEvaluation]:
-    """Provide the application-scoped evaluation service."""
-
-    return _evaluation_service
-
-
 JobService = Annotated[CrudService[Job], Depends(get_job_service)]
 ApplicationServiceDependency = Annotated[ApplicationService, Depends(get_application_service)]
-CandidateService = Annotated[CrudService[Candidate], Depends(get_candidate_service)]
-EvaluationService = Annotated[CrudService[CandidateEvaluation], Depends(get_evaluation_service)]

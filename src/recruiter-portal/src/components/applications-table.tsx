@@ -1,6 +1,6 @@
 import type { JobApplication } from "@domain";
-
-const formatDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Madrid" }).format(new Date(value));
+import Link from "next/link";
+import { formatDateTime } from "@/lib/format";
 
 export function ApplicationsTable({ applications }: { applications: JobApplication[] }) {
   if (applications.length === 0) {
@@ -11,9 +11,9 @@ export function ApplicationsTable({ applications }: { applications: JobApplicati
     <div className="overflow-x-auto"><table className="w-full min-w-175 text-left text-sm">
       <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3 font-semibold">Candidate</th><th className="px-5 py-3 font-semibold">Email</th><th className="px-5 py-3 font-semibold">Submitted</th><th className="px-5 py-3 font-semibold">Resume</th></tr></thead>
       <tbody className="divide-y divide-slate-100">{applications.map((application) => <tr key={application.id} className="align-top hover:bg-slate-50">
-        <td className="px-5 py-4"><p className="font-semibold">{application.candidateName}</p>{application.message && <p className="mt-1 max-w-md whitespace-pre-line text-slate-500">{application.message}</p>}</td>
+        <td className="px-5 py-4"><Link href={`/candidates/${application.id}`} className="font-semibold hover:text-cyan-700 hover:underline">{application.candidateName}</Link>{application.message && <p className="mt-1 max-w-md whitespace-pre-line text-slate-500">{application.message}</p>}</td>
         <td className="px-5 py-4"><a className="text-cyan-700 hover:underline" href={`mailto:${application.candidateEmail}`}>{application.candidateEmail}</a></td>
-        <td className="whitespace-nowrap px-5 py-4 text-slate-600">{formatDate(application.submittedAt)}</td>
+        <td className="whitespace-nowrap px-5 py-4 text-slate-600">{formatDateTime(application.submittedAt)}</td>
         <td className="px-5 py-4"><a className="inline-flex items-center gap-2 font-semibold text-cyan-700 hover:underline" href={`/applications/${application.id}/resume`} download={application.resumeFileName}>⬇ {application.resumeFileName}</a></td>
       </tr>)}</tbody>
     </table></div>

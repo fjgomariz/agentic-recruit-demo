@@ -1,6 +1,6 @@
 # Recruitment Foundry Demo API
 
-FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persisted in Azure Cosmos DB for NoSQL. Candidates and evaluations remain in memory and reset whenever the process restarts.
+FastAPI backend for jobs, candidate applications, and AI-assisted job authoring. Jobs and applications are persisted in Azure Cosmos DB for NoSQL, and resumes in Azure Blob Storage.
 
 ## Architecture
 
@@ -8,13 +8,13 @@ FastAPI backend for jobs, candidates, and candidate evaluations. Jobs are persis
 - `app/domain`: Pydantic v2 models matching `src/shared/domain`.
 - `app/services`: application-level CRUD behavior, the candidate application workflow, and the Foundry job description agent client.
 - `app/storage`: Blob Storage access for uploaded resumes.
-- `app/repositories`: persistence contracts, Cosmos DB Job storage, and in-memory storage with seed records for candidates and evaluations.
+- `app/repositories`: persistence contracts, Cosmos DB job and application storage, and an in-memory repository used by tests.
 - `app/models`: transport models that are not domain entities.
 - `app/dependencies`: FastAPI dependency providers that compose repositories and services.
 - `app/main.py`: application metadata and router registration.
 - `tests`: focused endpoint behavior checks.
 
-The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repository for jobs and in-memory repositories for candidates and evaluations. On startup, the API binds to the `recruitment` database and id-partitioned `jobs` container provisioned by Bicep (Entra ID data-plane roles cannot create them). The Cosmos DB connection is established in the background with retries, so `/health` responds immediately and job endpoints return `503` until storage is reachable. A new, empty jobs container stays empty: jobs are created through the recruiter portal or `POST /jobs`. The sample jobs in `tests/job_fixtures.py` are test data only.
+The API depends inward from routes to services to repository contracts. FastAPI dependency providers select the Cosmos DB repositories for jobs and applications and the Blob Storage resume store. On startup, the API binds to the `recruitment` database and its `jobs` and `applications` containers provisioned by Bicep (Entra ID data-plane roles cannot create them). The Cosmos DB connection is established in the background with retries, so `/health` responds immediately and job endpoints return `503` until storage is reachable. A new, empty jobs container stays empty: jobs are created through the recruiter portal or `POST /jobs`. The sample jobs in `tests/job_fixtures.py` are test data only.
 
 ## Start locally
 
@@ -68,22 +68,17 @@ Run tests with:
 pytest
 ```
 
-## REST resources
+## Jobs
 
-Each resource supports collection retrieval, retrieval by ID, creation, and full replacement:
-
-- `/jobs`
-- `/candidates`
-- `/evaluations`
-
-Jobs also support `DELETE /jobs/{job_id}`, which returns `204` when deleted and `404` when the job does not exist. POST returns `409` for a duplicate ID. PUT returns `400` when route and body IDs differ and `404` when the target does not exist.
+`/jobs` supports collection retrieval, retrieval by ID, creation, full replacement, and `DELETE /jobs/{job_id}`, which returns `204` when deleted and `404` when the job does not exist. POST returns `409` for a duplicate ID. PUT returns `400` when route and body IDs differ and `404` when the target does not exist.
 
 ## Candidate applications
 
 | Method and path | Purpose |
 | --- | --- |
-| `POST /jobs/{job_id}/applications` | Multipart form with `candidateName`, `candidateEmail`, optional `message`, and `resume` (PDF, 5 MB max). Uploads the resume to the `resumes` blob container as `<applicationId>.pdf`, stores the application in the Cosmos DB `applications` container, increments the job's `applicantCount`, and returns `201`. Returns `404` for an unknown job and `400` when the job is not `Published` or the file is empty, too large, or not a PDF (checked by content, not extension). |
+| `POST /jobs/{job_id}/applications` | Multipart form with `candidateName`, `candidateEmail`, optional `message`, and `resume` (PDF, 5 MB max). Uploads the resume to the `resumes` blob container as `<applicationId>.pdf`, stores the application in the Cosmos DB `applications` container, and returns `201`. The applications container is the source of truth for application counts; the job's legacy `applicantCount` is not updated. Returns `404` for an unknown job and `400` when the job is not `Published` or the file is empty, too large, or not a PDF (checked by content, not extension). |
 | `GET /jobs/{job_id}/applications` | Applications for a job, newest first. |
+| `GET /applications` | Applications across all jobs, newest first. Used by the recruiter Candidates page and dashboard. |
 | `GET /applications/{application_id}` | One application. |
 | `GET /applications/{application_id}/resume` | The stored PDF as an attachment with the original file name. |
 

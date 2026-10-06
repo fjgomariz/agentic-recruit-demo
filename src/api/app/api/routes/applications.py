@@ -41,6 +41,11 @@ async def list_job_applications(job_id: str, service: ApplicationServiceDependen
     return await service.list_for_job(job_id)
 
 
+@router.get("/applications", response_model=list[JobApplication], summary="List all applications, newest first")
+async def list_applications(service: ApplicationServiceDependency) -> list[JobApplication]:
+    return await service.list_all()
+
+
 @router.get("/applications/{application_id}", response_model=JobApplication, summary="Get an application")
 async def get_application(application_id: str, service: ApplicationServiceDependency) -> JobApplication:
     return await execute(lambda: service.get(application_id))

@@ -44,6 +44,21 @@ export async function getJobApplications(jobId: string): Promise<JobApplication[
   return (await response.json()) as JobApplication[];
 }
 
+/** Retrieves every candidate application across jobs, newest first. */
+export async function getApplications(): Promise<JobApplication[]> {
+  const response = await fetch(`${apiBaseUrl}/applications`, { cache: "no-store" });
+  if (!response.ok) throw await readError(response, `Failed to retrieve applications: ${response.status}`);
+  return (await response.json()) as JobApplication[];
+}
+
+/** Retrieves one candidate application. */
+export async function getApplication(id: string): Promise<JobApplication | undefined> {
+  const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}`, { cache: "no-store" });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw await readError(response, `Failed to retrieve application '${id}': ${response.status}`);
+  return (await response.json()) as JobApplication;
+}
+
 /** Streams an application's stored PDF resume from the API. */
 export async function downloadResume(applicationId: string): Promise<Response> {
   return fetch(`${apiBaseUrl}/applications/${encodeURIComponent(applicationId)}/resume`, { cache: "no-store" });

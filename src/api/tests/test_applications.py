@@ -30,14 +30,17 @@ class FakeApplicationsContainer:
         self.items.append(body.copy())
         return body.copy()
 
-    def query_items(self, query: str, *, parameters: list[dict[str, Any]], partition_key: str | None = None) -> Any:
-        value = parameters[0]["value"]
-        if "c.jobId" in query:
+    def query_items(self, query: str, *, parameters: list[dict[str, Any]] | None = None, partition_key: str | None = None) -> Any:
+        if parameters is None:
+            assert query == "SELECT * FROM c" and partition_key is None
+            matches = list(self.items)
+        elif "c.jobId" in query:
+            value = parameters[0]["value"]
             assert partition_key == value
             matches = sorted((i for i in self.items if i["jobId"] == value), key=lambda i: i["submittedAt"], reverse=True)
         else:
             assert partition_key is None
-            matches = [i for i in self.items if i["id"] == value]
+            matches = [i for i in self.items if i["id"] == parameters[0]["value"]]
 
         async def results() -> Any:
             for item in matches:
@@ -75,7 +78,6 @@ def make_service() -> tuple[ApplicationService, CrudService, FakeApplicationsCon
 @pytest.mark.asyncio
 async def test_submit_stores_resume_and_application() -> None:
     service, jobs, container, resumes = make_service()
-    before = (await jobs.get("senior-product-designer")).applicant_count
 
     application = await service.submit("senior-product-designer", " Ada Lovelace ", "ada@example.com", "Hello", "C:\\docs\\Ada CV.pdf", PDF)
 
@@ -86,10 +88,14 @@ async def test_submit_stores_resume_and_application() -> None:
     assert application.candidate_name == "Ada Lovelace"
     assert container.items[0]["jobId"] == "senior-product-designer"
     assert "candidateEmail" in container.items[0]
-    assert (await jobs.get("senior-product-designer")).applicant_count == before + 1
+    # The applications container is the source of truth; the job document is not modified.
+    assert (await jobs.get("senior-product-designer")).applicant_count == 42
     assert await service.get(application.id) == application
     assert await service.list_for_job("senior-product-designer") == [application]
     assert await service.list_for_job("frontend-engineer") == []
+
+    second = await service.submit("frontend-engineer", "Grace Hopper", "grace@example.com", "", "grace.pdf", PDF)
+    assert [item.id for item in await service.list_all()] == [second.id, application.id]
 
 
 @pytest.mark.asyncio
@@ -138,6 +144,7 @@ def test_application_endpoints() -> None:
 
         listed = client.get("/jobs/senior-product-designer/applications")
         assert [item["id"] for item in listed.json()] == [body["id"]]
+        assert [item["id"] for item in client.get("/applications").json()] == [body["id"]]
         assert client.get(f"/applications/{body['id']}").json()["candidateEmail"] == "ada@example.com"
 
         resume = client.get(f"/applications/{body['id']}/resume")

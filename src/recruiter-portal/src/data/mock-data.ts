@@ -1,27 +1,6 @@
-import {
-  mockAgentExecutions,
-  mockApprovalWorkflows,
-  mockCandidateApplicationDetails,
-  mockCandidateApplications,
-  mockCandidateEvaluations,
-  mockCandidates,
-  mockEvaluationReports,
-  mockResumes,
-} from "@mocks";
+import { mockAgentExecutions, mockApprovalWorkflows } from "@mocks";
 
-/** Canonical mock candidate identities. */
-export const candidates = mockCandidates;
-/** Canonical mock application records. */
-export const candidateApplications = mockCandidateApplications;
-/** Canonical mock resume metadata. */
-export const resumes = mockResumes;
-/** Canonical mock candidate evaluations. */
-export const candidateEvaluations = mockCandidateEvaluations;
-/** Canonical mock evaluation reports. */
-export const evaluationReports = mockEvaluationReports;
-/** Resolved canonical records used by candidate screens. */
-export const candidateDetails = mockCandidateApplicationDetails;
-/** Canonical mock agent execution records. */
+/** Mock agent execution records; AI operations are not connected to Foundry telemetry yet. */
 export const agentExecutions = mockAgentExecutions;
-/** Canonical mock human approval workflows. */
+/** Mock human approval history shown on the job approval page. */
 export const approvalWorkflows = mockApprovalWorkflows;

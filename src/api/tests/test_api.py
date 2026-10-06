@@ -28,32 +28,21 @@ def test_health() -> None:
     assert response.json()["status"] == "healthy"
 
 
-def test_seeded_collections_and_openapi() -> None:
+def test_openapi_contract() -> None:
     assert len(client.get("/jobs").json()) >= 1
-    assert len(client.get("/candidates").json()) >= 1
-    assert len(client.get("/evaluations").json()) >= 1
     openapi = client.get("/openapi.json")
     assert openapi.status_code == 200
     paths = openapi.json()["paths"]
-    for resource in ("jobs", "candidates", "evaluations"):
-        assert {"get", "post"} <= paths[f"/{resource}"].keys()
-        assert {"get", "put"} <= paths[f"/{resource}/{{{resource[:-1]}_id}}"].keys()
-    assert "delete" in paths["/jobs/{job_id}"]
+    assert {"get", "post"} <= paths["/jobs"].keys()
+    assert {"get", "put", "delete"} <= paths["/jobs/{job_id}"].keys()
+    assert {"get", "post"} <= paths["/jobs/{job_id}/applications"].keys()
+    assert "get" in paths["/applications"]
+    assert "get" in paths["/applications/{application_id}"]
+    assert "get" in paths["/applications/{application_id}/resume"]
+    assert "/candidates" not in paths and "/evaluations" not in paths
     job_properties = openapi.json()["components"]["schemas"]["Job"]["properties"]
     assert "employmentType" in job_properties
     assert "employment_type" not in job_properties
-
-
-def test_candidate_crud_and_error_responses() -> None:
-    candidate = {"id": "alex-rivera", "firstName": "Alex", "lastName": "Rivera", "email": "alex@example.demo", "location": "Madrid, ES"}
-    created = client.post("/candidates", json=candidate)
-    assert created.status_code == 201
-    candidate["location"] = "Barcelona, ES"
-    updated = client.put("/candidates/alex-rivera", json=candidate)
-    assert updated.status_code == 200
-    assert updated.json()["location"] == "Barcelona, ES"
-    assert client.get("/candidates/missing").status_code == 404
-    assert client.post("/candidates", json=candidate).status_code == 409
 
 
 def test_job_crud_and_error_responses() -> None:

@@ -72,18 +72,18 @@ class ApplicationService:
 
         await self._resumes.upload(blob_name, resume)
         try:
-            created = await self._applications.create(application)
+            return await self._applications.create(application)
         except Exception:
             # Do not leave an orphaned resume behind when the record cannot be written.
             logger.exception("Failed to record application id=%s; removing its resume", application_id)
             await self._resumes.delete(blob_name)
             raise
 
-        await self._increment_applicant_count(job)
-        return created
-
     async def list_for_job(self, job_id: str) -> list[JobApplication]:
         return await self._applications.list_for_job(job_id)
+
+    async def list_all(self) -> list[JobApplication]:
+        return await self._applications.list_all()
 
     async def get(self, application_id: str) -> JobApplication:
         application = await self._applications.get(application_id)
@@ -95,12 +95,3 @@ class ApplicationService:
         application = await self.get(application_id)
         blob_name = application.resume_blob_path.split("/", 1)[-1]
         return application, await self._resumes.download(blob_name)
-
-    async def _increment_applicant_count(self, job: Job) -> None:
-        """Keep the job's applicant counter in step; a failure here never rejects the application."""
-
-        try:
-            current = await self._jobs.get(job.id)
-            await self._jobs.update(job.id, current.model_copy(update={"applicant_count": current.applicant_count + 1}))
-        except Exception:
-            logger.exception("Could not update applicant count for job=%s", job.id)
