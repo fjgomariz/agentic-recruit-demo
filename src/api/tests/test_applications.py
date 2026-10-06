@@ -30,6 +30,14 @@ class FakeApplicationsContainer:
         self.items.append(body.copy())
         return body.copy()
 
+    async def patch_item(self, item: str, partition_key: str, patch_operations: list[dict[str, Any]]) -> dict[str, Any]:
+        document = next(i for i in self.items if i["id"] == item)
+        assert document["jobId"] == partition_key
+        for operation in patch_operations:
+            assert operation["op"] == "set" and operation["path"].count("/") == 1
+            document[operation["path"][1:]] = operation["value"]
+        return document.copy()
+
     def query_items(self, query: str, *, parameters: list[dict[str, Any]] | None = None, partition_key: str | None = None) -> Any:
         if parameters is None:
             assert query == "SELECT * FROM c" and partition_key is None
@@ -140,7 +148,8 @@ def test_application_endpoints() -> None:
         created = client.post("/jobs/senior-product-designer/applications", data=form, files={"resume": ("ada.pdf", PDF, "application/pdf")})
         assert created.status_code == 201, created.text
         body = created.json()
-        assert set(body) == {"id", "jobId", "candidateName", "candidateEmail", "message", "resumeFileName", "resumeBlobPath", "submittedAt"}
+        assert set(body) == {"id", "jobId", "candidateName", "candidateEmail", "message", "resumeFileName", "resumeBlobPath", "submittedAt", "evaluation", "decision"}
+        assert body["evaluation"] is None and body["decision"] is None
 
         listed = client.get("/jobs/senior-product-designer/applications")
         assert [item["id"] for item in listed.json()] == [body["id"]]

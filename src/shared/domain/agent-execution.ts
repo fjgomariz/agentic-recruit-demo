@@ -27,4 +27,8 @@ export interface AgentExecution {
   outputSummary?: string;
   /** Safe error summary when execution fails. */
   errorMessage?: string;
+  /** Model input tokens consumed by the run. */
+  inputTokens?: number;
+  /** Model output tokens produced by the run. */
+  outputTokens?: number;
 }

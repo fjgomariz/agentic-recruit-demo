@@ -57,6 +57,7 @@ async def test_connecting_binds_cosmos_without_writing_seed_jobs(monkeypatch: py
 
     monkeypatch.setattr(services, "CosmosJobRepository", FakeCosmosJobRepository)
     monkeypatch.setattr(services, "CosmosApplicationRepository", FakeCosmosApplicationRepository)
+    monkeypatch.setattr(services, "CosmosAgentExecutionRepository", FakeCosmosApplicationRepository)
 
     await services._connect_job_service(object())
     try:

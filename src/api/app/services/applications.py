@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import PurePath
 
-from app.domain import Job, JobApplication, JobStatus
+from app.domain import ApplicationDecision, ApplicationEvaluation, Job, JobApplication, JobStatus
 from app.repositories import CosmosApplicationRepository
 from app.services.crud import CrudService, EntityNotFoundError
 from app.storage import ResumeStore
@@ -95,3 +95,12 @@ class ApplicationService:
         application = await self.get(application_id)
         blob_name = application.resume_blob_path.split("/", 1)[-1]
         return application, await self._resumes.download(blob_name)
+
+    async def get_job(self, job_id: str) -> Job:
+        return await self._jobs.get(job_id)
+
+    async def set_evaluation(self, application: JobApplication, evaluation: ApplicationEvaluation | None) -> JobApplication:
+        return await self._applications.set_field(application, "evaluation", evaluation)
+
+    async def set_decision(self, application: JobApplication, decision: ApplicationDecision | None) -> JobApplication:
+        return await self._applications.set_field(application, "decision", decision)

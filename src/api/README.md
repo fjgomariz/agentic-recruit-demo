@@ -82,7 +82,20 @@ pytest
 | `GET /applications/{application_id}` | One application. |
 | `GET /applications/{application_id}/resume` | The stored PDF as an attachment with the original file name. |
 
-An application stores `id`, `jobId`, `candidateName`, `candidateEmail`, `message`, `resumeFileName`, `resumeBlobPath` (`resumes/<id>.pdf`), and `submittedAt`. If the Cosmos DB write fails, the uploaded blob is deleted.
+An application stores `id`, `jobId`, `candidateName`, `candidateEmail`, `message`, `resumeFileName`, `resumeBlobPath` (`resumes/<id>.pdf`), and `submittedAt`, plus the `evaluation` and `decision` described below. If the Cosmos DB write fails, the uploaded blob is deleted.
+
+## Candidate evaluation and decisions
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /applications/{application_id}/evaluation` | Starts or restarts the AI evaluation and returns `202` with the evaluation `In progress`. Returns `409` while another evaluation started less than three minutes ago is still running, and `503` when the agent is not configured. |
+| `PUT /applications/{application_id}/decision` | Records the recruiter decision: `{ "status": "Advanced" \| "Rejected", "comment": "", "decidedBy": "" }`. |
+| `DELETE /applications/{application_id}/decision` | Clears the decision. |
+| `GET /agent-executions?limit=50` | Recent runs of both Foundry agents, newest first (AI Operations). |
+
+Submitting an application also starts the evaluation in the background. The evaluation service marks the application `In progress`, downloads the resume, sends the job posting and the PDF to the `candidate-evaluator` agent, and stores the result in `evaluation`: `status` (`In progress`, `Completed`, `Needs review`, `Failed`), `overallScore` (0–100), `recommendation`, `summary`, `strengths`, `considerations`, `scores` (one 0–5 score per requirement with its rationale), agent name and version, the Foundry response ID, timestamps, and an `errorMessage` on failure. When Azure AI Content Safety blocks a resume as a prompt injection, the evaluation is stored as `Needs review` with the recommendation `Needs manual review` and no score.
+
+`evaluation` and `decision` are written with Cosmos DB partial updates (`patch_item`), so re-evaluating never overwrites the recruiter's decision and vice versa. Evaluations run in the API process; if the API restarts mid-evaluation, the recruiter can start it again after three minutes.
 
 ## AI-assisted authoring
 
@@ -90,8 +103,10 @@ An application stores `id`, `jobId`, `candidateName`, `candidateEmail`, `message
 
 | Variable | Required | Default |
 | --- | --- | --- |
-| `AZURE_AI_PROJECT_ENDPOINT` | No; AI features return `503` without it | None |
+| `AZURE_AI_PROJECT_ENDPOINT` | No; AI features return `503` without it, and new applications stay pending | None |
 | `JOB_DESCRIPTION_AGENT_NAME` | No | `job-description-writer` |
+| `CANDIDATE_EVALUATION_AGENT_NAME` | No | `candidate-evaluator` |
+| `AZURE_AI_MODEL_DEPLOYMENT_NAME` | No; recorded on agent runs | `gpt-5.4-mini` |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | No; enables Azure Monitor telemetry | None |
 
 ## Cosmos DB environment variables
@@ -103,6 +118,7 @@ An application stores `id`, `jobId`, `candidateName`, `candidateEmail`, `message
 | `AZURE_COSMOS_DATABASE_NAME` | No | `recruitment` |
 | `AZURE_COSMOS_JOBS_CONTAINER_NAME` | No | `jobs` |
 | `AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME` | No | `applications` |
+| `AZURE_COSMOS_AGENT_EXECUTIONS_CONTAINER_NAME` | No | `agent-executions` |
 
 ## Blob Storage environment variables
 

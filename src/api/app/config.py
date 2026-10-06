@@ -12,6 +12,7 @@ class CosmosSettings:
     database_name: str = "recruitment"
     jobs_container_name: str = "jobs"
     applications_container_name: str = "applications"
+    agent_executions_container_name: str = "agent-executions"
     key: str | None = None
 
     @classmethod
@@ -26,6 +27,7 @@ class CosmosSettings:
             database_name=os.getenv("AZURE_COSMOS_DATABASE_NAME", "recruitment"),
             jobs_container_name=os.getenv("AZURE_COSMOS_JOBS_CONTAINER_NAME", "jobs"),
             applications_container_name=os.getenv("AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME", "applications"),
+            agent_executions_container_name=os.getenv("AZURE_COSMOS_AGENT_EXECUTIONS_CONTAINER_NAME", "agent-executions"),
             key=os.getenv("AZURE_COSMOS_KEY"),
         )
 
@@ -53,6 +55,8 @@ class AgentSettings:
 
     project_endpoint: str | None
     job_description_agent_name: str = "job-description-writer"
+    candidate_evaluation_agent_name: str = "candidate-evaluator"
+    model_deployment_name: str = "gpt-5.4-mini"
 
     @classmethod
     def from_environment(cls) -> "AgentSettings":
@@ -61,4 +65,6 @@ class AgentSettings:
         return cls(
             project_endpoint=os.getenv("AZURE_AI_PROJECT_ENDPOINT") or None,
             job_description_agent_name=os.getenv("JOB_DESCRIPTION_AGENT_NAME", "job-description-writer"),
+            candidate_evaluation_agent_name=os.getenv("CANDIDATE_EVALUATION_AGENT_NAME", "candidate-evaluator"),
+            model_deployment_name=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-5.4-mini"),
         )

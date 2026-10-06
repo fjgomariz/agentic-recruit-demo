@@ -26,7 +26,7 @@ The Container Apps environment remains externally accessible and has public netw
 | Application Insights | Workspace-based application telemetry for requests, dependencies, exceptions, and traces. |
 | Virtual network | Contains dedicated Container Apps and private-endpoints subnets without custom routes or network appliances. |
 | Storage account | Standard LRS blob storage with the private `resumes` container for candidate resumes. Public network access, public blob access, and shared-key access are disabled. |
-| Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled, the `recruitment` database, the id-partitioned `jobs` container, and the `applications` container partitioned by `/jobId`. |
+| Azure Cosmos DB | Private-only, serverless Cosmos DB for NoSQL account with local authentication disabled, the `recruitment` database, the id-partitioned `jobs` container, the `applications` container partitioned by `/jobId`, and the `agent-executions` container partitioned by `/agentName` for agent run records. |
 | Private endpoints and DNS | Blob and Cosmos SQL private endpoints plus linked Private DNS zones and Azure-managed DNS records. |
 | Container Apps environment | External workload-profiles environment integrated with the dedicated subnet. Environment logs flow to Log Analytics. |
 | API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account, Storage Blob Data Contributor on the `resumes` container, and Foundry User on the Foundry project. |
@@ -120,7 +120,7 @@ Private DNS resolution can only be proven from inside the VNet. Run `nslookup` o
 
 The deployment outputs safe names, hostnames, resource IDs, and the three app URLs (`API_URL`, `PUBLIC_PORTAL_URL`, `RECRUITER_PORTAL_URL`). Account keys, Cosmos DB keys, credentials, and data-service connection strings are not exposed.
 
-The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor at the account scope. That role allows item operations only, which is why the `jobs` and `applications` containers are provisioned in Bicep. The identity also has Storage Blob Data Contributor scoped to the `resumes` container only.
+The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor at the account scope. That role allows item operations only, which is why the `jobs`, `applications`, and `agent-executions` containers are provisioned in Bicep. The identity also has Storage Blob Data Contributor scoped to the `resumes` container only.
 
 ## Future expansion
 

@@ -8,9 +8,11 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 
 from app.config import CosmosSettings, StorageSettings
-from app.domain import Job
-from app.repositories import CosmosApplicationRepository, CosmosJobRepository
-from app.services import ApplicationService, CrudService
+from app.dependencies import recording
+from app.dependencies.agents import CandidateEvaluationAgent
+from app.domain import AgentExecution, Job
+from app.repositories import CosmosAgentExecutionRepository, CosmosApplicationRepository, CosmosJobRepository
+from app.services import ApplicationService, CrudService, EvaluationService
 from app.storage import BlobResumeStore
 
 logger = logging.getLogger(__name__)
@@ -25,7 +27,7 @@ _job_service_task: asyncio.Task[None] | None = None
 
 
 async def _connect_job_service(settings: CosmosSettings) -> None:
-    """Connect to the Cosmos DB jobs and applications containers."""
+    """Connect to the Cosmos DB jobs, applications, and agent execution containers."""
 
     global _job_repository, _job_service, _application_repository
     repository = CosmosJobRepository(settings)
@@ -33,12 +35,15 @@ async def _connect_job_service(settings: CosmosSettings) -> None:
         await repository.initialize()
         applications = CosmosApplicationRepository(repository.client, settings)
         await applications.initialize()
+        executions = CosmosAgentExecutionRepository(repository.client, settings)
+        await executions.initialize()
     except BaseException:
         await repository.close()
         raise
     _job_repository = repository
     _job_service = CrudService(repository, "Job")
     _application_repository = applications
+    recording.set_repository(executions)
 
 
 async def _connect_job_service_with_retry(settings: CosmosSettings) -> None:
@@ -83,6 +88,7 @@ async def close_job_service() -> None:
     _job_service_task = None
     _application_repository = None
     _resume_store = None
+    recording.set_repository(None)
 
 
 def get_job_service() -> CrudService[Job]:
@@ -106,5 +112,30 @@ def get_application_service(jobs: Annotated[CrudService[Job], Depends(get_job_se
     return ApplicationService(jobs, _application_repository, _resume_store)
 
 
+def get_evaluation_service(
+    applications: Annotated[ApplicationService, Depends(get_application_service)],
+    agent: CandidateEvaluationAgent,
+) -> EvaluationService:
+    """Provide the evaluation service on top of application storage and the evaluator agent."""
+
+    return EvaluationService(applications, agent)
+
+
+class AgentExecutionLog:
+    """Read access to recorded agent runs."""
+
+    async def list_recent(self, limit: int) -> list[AgentExecution]:
+        repository = recording.get_repository()
+        if repository is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Agent run storage is still connecting. Retry shortly.")
+        return await repository.list_recent(limit)
+
+
+def get_agent_execution_log() -> AgentExecutionLog:
+    return AgentExecutionLog()
+
+
 JobService = Annotated[CrudService[Job], Depends(get_job_service)]
 ApplicationServiceDependency = Annotated[ApplicationService, Depends(get_application_service)]
+EvaluationServiceDependency = Annotated[EvaluationService, Depends(get_evaluation_service)]
+AgentExecutionLogDependency = Annotated[AgentExecutionLog, Depends(get_agent_execution_log)]

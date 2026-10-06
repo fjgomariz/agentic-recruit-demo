@@ -50,6 +50,9 @@ param agentModelCapacity int = 50
 @description('Name of the Foundry agent that drafts job descriptions.')
 param jobDescriptionAgentName string = 'job-description-writer'
 
+@description('Name of the Foundry agent that evaluates candidate resumes.')
+param candidateEvaluationAgentName string = 'candidate-evaluator'
+
 var deployApps = !empty(apiImage) && !empty(publicPortalImage) && !empty(recruiterPortalImage)
 
 var workloadName = 'recruitment'
@@ -282,13 +285,17 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'AZURE_COSMOS_DATABASE_NAME', value: cosmos.outputs.databaseName }
       { name: 'AZURE_COSMOS_JOBS_CONTAINER_NAME', value: cosmos.outputs.jobsContainerName }
       { name: 'AZURE_COSMOS_APPLICATIONS_CONTAINER_NAME', value: cosmos.outputs.applicationsContainerName }
+      { name: 'AZURE_COSMOS_AGENT_EXECUTIONS_CONTAINER_NAME', value: cosmos.outputs.agentExecutionsContainerName }
       { name: 'AZURE_STORAGE_BLOB_ENDPOINT', value: storage.outputs.blobEndpoint }
       { name: 'AZURE_STORAGE_RESUMES_CONTAINER_NAME', value: storage.outputs.resumesContainerName }
       { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundry.outputs.projectEndpoint }
       { name: 'JOB_DESCRIPTION_AGENT_NAME', value: jobDescriptionAgentName }
+      { name: 'CANDIDATE_EVALUATION_AGENT_NAME', value: candidateEvaluationAgentName }
+      { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundry.outputs.modelDeploymentName }
       { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
       { name: 'AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING', value: 'true' }
-      { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'true' }
+      // Resumes are sent to the evaluator as PDFs; keep candidate content out of client-side traces.
+      { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'false' }
     ]
     secretEnv: {
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.applicationInsightsConnectionString
@@ -356,6 +363,7 @@ output AZURE_AI_PROJECT_NAME string = foundry.outputs.projectName
 output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundry.outputs.modelDeploymentName
 output JOB_DESCRIPTION_AGENT_NAME string = jobDescriptionAgentName
+output CANDIDATE_EVALUATION_AGENT_NAME string = candidateEvaluationAgentName
 output API_URL string = deployApps ? api!.outputs.url : ''
 output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
 output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''

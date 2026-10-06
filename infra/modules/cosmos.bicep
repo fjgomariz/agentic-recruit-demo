@@ -10,6 +10,9 @@ param jobsContainerName string = 'jobs'
 @description('Name of the job-partitioned candidate applications container.')
 param applicationsContainerName string = 'applications'
 
+@description('Name of the agent execution records container.')
+param agentExecutionsContainerName string = 'agent-executions'
+
 @description('Azure region for Cosmos DB.')
 param location string
 
@@ -89,10 +92,28 @@ resource applicationsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabas
   }
 }
 
+// One record per Foundry agent run, shown on the recruiter portal's AI Operations page.
+resource agentExecutionsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2026-03-15' = {
+  parent: database
+  name: agentExecutionsContainerName
+  properties: {
+    resource: {
+      id: agentExecutionsContainerName
+      partitionKey: {
+        paths: [
+          '/agentName'
+        ]
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
 output accountName string = account.name
 output accountId string = account.id
 output databaseName string = database.name
 output jobsContainerName string = jobsContainer.name
 output applicationsContainerName string = applicationsContainer.name
+output agentExecutionsContainerName string = agentExecutionsContainer.name
 output endpoint string = account.properties.documentEndpoint
 output endpointHostname string = '${account.name}.documents.azure.com'

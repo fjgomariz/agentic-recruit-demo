@@ -1,6 +1,6 @@
 """Repository implementations."""
 
-from .cosmos import CosmosApplicationRepository, CosmosJobRepository
+from .cosmos import CosmosAgentExecutionRepository, CosmosApplicationRepository, CosmosJobRepository
 from .memory import InMemoryRepository
 
-__all__ = ["CosmosApplicationRepository", "CosmosJobRepository", "InMemoryRepository"]
+__all__ = ["CosmosAgentExecutionRepository", "CosmosApplicationRepository", "CosmosJobRepository", "InMemoryRepository"]

@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["overallScore", "recommendation", "summary", "strengths", "considerations", "criteria"],
+  "properties": {
+    "overallScore": {
+      "type": "integer",
+      "description": "Overall fit from 0 to 100."
+    },
+    "recommendation": {
+      "type": "string",
+      "enum": ["Strong match", "Possible match", "Not a match", "Needs manual review"]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two or three sentences for the recruiter."
+    },
+    "strengths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "considerations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "score", "rationale"],
+        "properties": {
+          "criterion": { "type": "string" },
+          "score": { "type": "integer", "description": "0 to 5." },
+          "rationale": { "type": "string" }
+        }
+      }
+    }
+  }
+}

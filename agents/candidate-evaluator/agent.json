@@ -1,0 +1,8 @@
+{
+  "name": "candidate-evaluator",
+  "description": "Scores a candidate's PDF resume against a job posting and explains the evidence for recruiter review.",
+  "instructionsFile": "instructions.md",
+  "outputSchemaFile": "output-schema.json",
+  "outputSchemaName": "candidate_evaluation",
+  "reasoningEffort": "low"
+}

@@ -21,9 +21,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@domain": ["../shared/domain/index.ts"],
-      "@domain/*": ["../shared/domain/*"],
-      "@mocks": ["../shared/mocks/index.ts"],
-      "@mocks/*": ["../shared/mocks/*"]
+      "@domain/*": ["../shared/domain/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

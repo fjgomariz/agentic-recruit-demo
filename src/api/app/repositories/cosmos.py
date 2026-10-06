@@ -10,9 +10,10 @@ from azure.cosmos.exceptions import (
     CosmosResourceNotFoundError,
 )
 from azure.identity.aio import DefaultAzureCredential
+from pydantic import BaseModel
 
 from app.config import CosmosSettings
-from app.domain import Job, JobApplication
+from app.domain import AgentExecution, Job, JobApplication
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,51 @@ class CosmosApplicationRepository:
             return JobApplication.model_validate(item)
         return None
 
+    async def set_field(self, application: JobApplication, field: str, value: BaseModel | None) -> JobApplication:
+        """Set one top-level field with a partial update, so evaluation and decision writes never overwrite each other."""
+
+        serialized = value.model_dump(mode="json", by_alias=True, exclude_none=True) if value is not None else None
+        item = await self._get_container().patch_item(
+            item=application.id,
+            partition_key=application.job_id,
+            patch_operations=[{"op": "set", "path": f"/{field}", "value": serialized}],
+        )
+        return JobApplication.model_validate(item)
+
     def _get_container(self) -> Any:
         if self._container is None:
             raise RuntimeError("CosmosApplicationRepository.initialize() must be called before use")
+        return self._container
+
+
+class CosmosAgentExecutionRepository:
+    """Record Foundry agent runs in the agent-executions container (partitioned by agent name)."""
+
+    def __init__(self, client: CosmosClient, settings: CosmosSettings) -> None:
+        self._client = client
+        self._database_name = settings.database_name
+        self._container_name = settings.agent_executions_container_name
+        self._container: Any | None = None
+
+    async def initialize(self) -> None:
+        container = self._client.get_database_client(self._database_name).get_container_client(self._container_name)
+        await container.read()
+        self._container = container
+        logger.info("Cosmos DB agent execution repository initialized container=%s", self._container_name)
+
+    async def create(self, execution: AgentExecution) -> AgentExecution:
+        body = execution.model_dump(mode="json", by_alias=True, exclude_none=True)
+        item = await self._get_container().create_item(body=body)
+        return AgentExecution.model_validate(item)
+
+    async def list_recent(self, limit: int) -> list[AgentExecution]:
+        """Return the most recent runs across agents (sorted in memory; demo-scale data)."""
+
+        items = self._get_container().query_items(query="SELECT * FROM c")
+        executions = [AgentExecution.model_validate(item) async for item in items]
+        return sorted(executions, key=lambda execution: execution.started_at, reverse=True)[:limit]
+
+    def _get_container(self) -> Any:
+        if self._container is None:
+            raise RuntimeError("CosmosAgentExecutionRepository.initialize() must be called before use")
         return self._container

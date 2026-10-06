@@ -1,4 +1,4 @@
-import type { Job, JobApplication } from "@domain";
+import type { AgentExecution, Job, JobApplication } from "@domain";
 
 const apiBaseUrl = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -57,6 +57,39 @@ export async function getApplication(id: string): Promise<JobApplication | undef
   if (response.status === 404) return undefined;
   if (!response.ok) throw await readError(response, `Failed to retrieve application '${id}': ${response.status}`);
   return (await response.json()) as JobApplication;
+}
+
+/** Starts (or restarts) the AI evaluation of an application; it completes in the background. */
+export async function evaluateApplication(id: string): Promise<JobApplication> {
+  const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}/evaluation`, { method: "POST", cache: "no-store" });
+  if (!response.ok) throw await readError(response, `Failed to start the evaluation: ${response.status}`);
+  return (await response.json()) as JobApplication;
+}
+
+/** Records the recruiter's decision on an application. */
+export async function decideApplication(id: string, decision: { status: "Advanced" | "Rejected"; comment: string; decidedBy: string }): Promise<JobApplication> {
+  const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}/decision`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(decision),
+    cache: "no-store",
+  });
+  if (!response.ok) throw await readError(response, `Failed to record the decision: ${response.status}`);
+  return (await response.json()) as JobApplication;
+}
+
+/** Clears the recruiter's decision so it can be made again. */
+export async function clearApplicationDecision(id: string): Promise<JobApplication> {
+  const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}/decision`, { method: "DELETE", cache: "no-store" });
+  if (!response.ok) throw await readError(response, `Failed to clear the decision: ${response.status}`);
+  return (await response.json()) as JobApplication;
+}
+
+/** Retrieves recent Foundry agent runs recorded by the API. */
+export async function getAgentExecutions(limit = 50): Promise<AgentExecution[]> {
+  const response = await fetch(`${apiBaseUrl}/agent-executions?limit=${limit}`, { cache: "no-store" });
+  if (!response.ok) throw await readError(response, `Failed to retrieve agent runs: ${response.status}`);
+  return (await response.json()) as AgentExecution[];
 }
 
 /** Streams an application's stored PDF resume from the API. */
