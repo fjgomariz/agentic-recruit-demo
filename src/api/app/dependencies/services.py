@@ -9,7 +9,7 @@ from fastapi import Depends, HTTPException, status
 
 from app.config import CosmosSettings, StorageSettings
 from app.dependencies import recording
-from app.dependencies.agents import CandidateEvaluationAgent
+from app.dependencies.agents import CandidateEvaluationAgent, CandidateReviewAgent
 from app.domain import AgentExecution, Job
 from app.repositories import CosmosAgentExecutionRepository, CosmosApplicationRepository, CosmosJobRepository
 from app.services import ApplicationService, CrudService, EvaluationService
@@ -114,11 +114,12 @@ def get_application_service(jobs: Annotated[CrudService[Job], Depends(get_job_se
 
 def get_evaluation_service(
     applications: Annotated[ApplicationService, Depends(get_application_service)],
-    agent: CandidateEvaluationAgent,
+    evaluator: CandidateEvaluationAgent,
+    reviewer: CandidateReviewAgent,
 ) -> EvaluationService:
-    """Provide the evaluation service on top of application storage and the evaluator agent."""
+    """Provide the assessment workflow on top of application storage and both agents."""
 
-    return EvaluationService(applications, agent)
+    return EvaluationService(applications, evaluator, reviewer)
 
 
 class AgentExecutionLog:

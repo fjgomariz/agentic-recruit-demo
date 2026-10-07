@@ -1,4 +1,4 @@
-import type { AgentExecution, Job, JobApplication } from "@domain";
+import type { AgentExecution, AgentFeedback, AiAssessmentRating, Job, JobApplication } from "@domain";
 
 const apiBaseUrl = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -59,15 +59,22 @@ export async function getApplication(id: string): Promise<JobApplication | undef
   return (await response.json()) as JobApplication;
 }
 
-/** Starts (or restarts) the AI evaluation of an application; it completes in the background. */
+/** Starts (or restarts) the AI assessment of an application; evaluation and review complete in the background. */
 export async function evaluateApplication(id: string): Promise<JobApplication> {
   const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}/evaluation`, { method: "POST", cache: "no-store" });
   if (!response.ok) throw await readError(response, `Failed to start the evaluation: ${response.status}`);
   return (await response.json()) as JobApplication;
 }
 
-/** Records the recruiter's decision on an application. */
-export async function decideApplication(id: string, decision: { status: "Advanced" | "Rejected"; comment: string; decidedBy: string }): Promise<JobApplication> {
+/** Re-runs only the reviewer agent on the current evaluation. */
+export async function reviewApplication(id: string): Promise<JobApplication> {
+  const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}/review`, { method: "POST", cache: "no-store" });
+  if (!response.ok) throw await readError(response, `Failed to start the review: ${response.status}`);
+  return (await response.json()) as JobApplication;
+}
+
+/** Records the recruiter's approval decision, rating of the AI assessment, and feedback for the agents. */
+export async function decideApplication(id: string, decision: { status: "Advanced" | "Rejected"; comment: string; decidedBy: string; aiRating: AiAssessmentRating | null; agentFeedback: string }): Promise<JobApplication> {
   const response = await fetch(`${apiBaseUrl}/applications/${encodeURIComponent(id)}/decision`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -90,6 +97,13 @@ export async function getAgentExecutions(limit = 50): Promise<AgentExecution[]> 
   const response = await fetch(`${apiBaseUrl}/agent-executions?limit=${limit}`, { cache: "no-store" });
   if (!response.ok) throw await readError(response, `Failed to retrieve agent runs: ${response.status}`);
   return (await response.json()) as AgentExecution[];
+}
+
+/** Retrieves recruiter feedback on the AI workflow (no candidate personal data). */
+export async function getAgentFeedback(): Promise<AgentFeedback[]> {
+  const response = await fetch(`${apiBaseUrl}/agent-feedback`, { cache: "no-store" });
+  if (!response.ok) throw await readError(response, `Failed to retrieve agent feedback: ${response.status}`);
+  return (await response.json()) as AgentFeedback[];
 }
 
 /** Streams an application's stored PDF resume from the API. */

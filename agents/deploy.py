@@ -2,10 +2,11 @@
 
 Each subfolder with an ``agent.json`` is one agent. A new agent version is created only when
 the definition (model, instructions, output schema, reasoning) changes, so redeploying the same
-commit is a no-op. Required environment variables:
+commit is a no-op. An agent can choose its model deployment with ``"modelDeployment"`` in
+``agent.json``; otherwise it uses the default. Required environment variables:
 
 - ``AZURE_AI_PROJECT_ENDPOINT``: Foundry project endpoint.
-- ``AZURE_AI_MODEL_DEPLOYMENT_NAME``: model deployment the agents use.
+- ``AZURE_AI_MODEL_DEPLOYMENT_NAME``: default model deployment.
 """
 
 import hashlib
@@ -32,10 +33,11 @@ PERMISSION_RETRY_SECONDS = 15
 PERMISSION_RETRY_ATTEMPTS = 24
 
 
-def load_agent(folder: Path, model: str) -> tuple[str, str, PromptAgentDefinition, str]:
+def load_agent(folder: Path, default_model: str) -> tuple[str, str, PromptAgentDefinition, str, str]:
     """Build an agent definition and a stable hash of everything that defines its behavior."""
 
     config = json.loads((folder / "agent.json").read_text(encoding="utf-8"))
+    model = config.get("modelDeployment") or default_model
     instructions = (folder / config["instructionsFile"]).read_text(encoding="utf-8").strip()
     schema = json.loads((folder / config["outputSchemaFile"]).read_text(encoding="utf-8"))
     effort = config.get("reasoningEffort")
@@ -52,7 +54,7 @@ def load_agent(folder: Path, model: str) -> tuple[str, str, PromptAgentDefinitio
         {"model": model, "instructions": instructions, "schema": schema, "effort": effort},
         sort_keys=True,
     )
-    return config["name"], config["description"], definition, hashlib.sha256(fingerprint.encode()).hexdigest()
+    return config["name"], config["description"], definition, hashlib.sha256(fingerprint.encode()).hexdigest(), model
 
 
 def latest_hash(client: AIProjectClient, name: str) -> str | None:
@@ -63,8 +65,8 @@ def latest_hash(client: AIProjectClient, name: str) -> str | None:
     return (agent.versions.latest.metadata or {}).get(HASH_METADATA_KEY)
 
 
-def publish(client: AIProjectClient, folder: Path, model: str) -> None:
-    name, description, definition, definition_hash = load_agent(folder, model)
+def publish(client: AIProjectClient, folder: Path, default_model: str) -> None:
+    name, description, definition, definition_hash, model = load_agent(folder, default_model)
     if latest_hash(client, name) == definition_hash:
         print(f"{name}: unchanged, keeping the latest version")
         return

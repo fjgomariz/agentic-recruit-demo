@@ -13,20 +13,8 @@ param tags object
 @description('Name of the existing workspace-based Application Insights resource used for agent tracing.')
 param applicationInsightsName string
 
-@description('Deployment name that agents reference.')
-param modelDeploymentName string
-
-@description('OpenAI model name.')
-param modelName string
-
-@description('OpenAI model version.')
-param modelVersion string
-
-@description('Model deployment SKU.')
-param modelSkuName string
-
-@description('Model capacity in thousands of tokens per minute.')
-param modelCapacity int
+@description('Model deployments used by the agents: name, model, version, skuName, capacity (thousands of tokens per minute). The first is the default model.')
+param modelDeployments array
 
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
   name: applicationInsightsName
@@ -69,26 +57,28 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2026-07-01' = {
   }
 }
 
-// Serialized after the project: concurrent writes on one account are rejected.
-resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2026-07-01' = {
+// One at a time and after the project: concurrent writes on one account are rejected.
+@batchSize(1)
+resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2026-07-01' = [for deployment in modelDeployments: {
   parent: account
-  name: modelDeploymentName
+  name: deployment.name
   dependsOn: [
     project
   ]
   sku: {
-    name: modelSkuName
-    capacity: modelCapacity
+    name: deployment.skuName
+    capacity: deployment.capacity
   }
   properties: {
     model: {
       format: 'OpenAI'
-      name: modelName
-      version: modelVersion
+      name: deployment.model
+      version: deployment.version
     }
+    // Pinned so agent behavior only changes through a reviewed version bump.
     versionUpgradeOption: 'NoAutoUpgrade'
   }
-}
+}]
 
 // Connecting Application Insights enables server-side tracing for every agent in the project.
 resource applicationInsightsConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2026-07-01' = {
@@ -113,4 +103,5 @@ output accountName string = account.name
 output projectName string = project.name
 output projectId string = project.id
 output projectEndpoint string = 'https://${account.properties.customSubDomainName}.services.ai.azure.com/api/projects/${project.name}'
-output modelDeploymentName string = modelDeployment.name
+output modelDeploymentName string = modelDeployment[0].name
+output modelDeploymentNames array = [for (deployment, index) in modelDeployments: modelDeployment[index].name]

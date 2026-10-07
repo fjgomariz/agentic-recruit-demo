@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import PurePath
 
-from app.domain import ApplicationDecision, ApplicationEvaluation, Job, JobApplication, JobStatus
+from app.domain import ApplicationDecision, ApplicationEvaluation, ApplicationReview, Job, JobApplication, JobStatus
 from app.repositories import CosmosApplicationRepository
 from app.services.crud import CrudService, EntityNotFoundError
 from app.storage import ResumeStore
@@ -14,6 +14,13 @@ from app.storage import ResumeStore
 logger = logging.getLogger(__name__)
 
 MAX_RESUME_BYTES = 5 * 1024 * 1024
+
+
+class _Unset:
+    """Marker for 'leave this field unchanged' in partial updates."""
+
+
+UNSET = _Unset()
 
 
 class ApplicationNotAllowedError(ValueError):
@@ -99,8 +106,15 @@ class ApplicationService:
     async def get_job(self, job_id: str) -> Job:
         return await self._jobs.get(job_id)
 
-    async def set_evaluation(self, application: JobApplication, evaluation: ApplicationEvaluation | None) -> JobApplication:
-        return await self._applications.set_field(application, "evaluation", evaluation)
+    async def update_assessment(
+        self,
+        application: JobApplication,
+        *,
+        evaluation: ApplicationEvaluation | None | _Unset = UNSET,
+        review: ApplicationReview | None | _Unset = UNSET,
+        decision: ApplicationDecision | None | _Unset = UNSET,
+    ) -> JobApplication:
+        """Set the given assessment fields in one partial update; omitted fields are left untouched, None clears."""
 
-    async def set_decision(self, application: JobApplication, decision: ApplicationDecision | None) -> JobApplication:
-        return await self._applications.set_field(application, "decision", decision)
+        fields = {name: value for name, value in (("evaluation", evaluation), ("review", review), ("decision", decision)) if value is not UNSET}
+        return await self._applications.set_fields(application, fields)

@@ -1,0 +1,9 @@
+{
+  "name": "candidate-evaluation-reviewer",
+  "description": "Independently checks the Candidate Evaluator's assessment against the resume and job, flags inconsistencies, bias, and overconfidence, and validates the score and recommendation.",
+  "modelDeployment": "gpt-5.4",
+  "instructionsFile": "instructions.md",
+  "outputSchemaFile": "output-schema.json",
+  "outputSchemaName": "candidate_evaluation_review",
+  "reasoningEffort": "medium"
+}

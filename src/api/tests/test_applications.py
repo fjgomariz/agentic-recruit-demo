@@ -148,7 +148,7 @@ def test_application_endpoints() -> None:
         created = client.post("/jobs/senior-product-designer/applications", data=form, files={"resume": ("ada.pdf", PDF, "application/pdf")})
         assert created.status_code == 201, created.text
         body = created.json()
-        assert set(body) == {"id", "jobId", "candidateName", "candidateEmail", "message", "resumeFileName", "resumeBlobPath", "submittedAt", "evaluation", "decision"}
+        assert set(body) == {"id", "jobId", "candidateName", "candidateEmail", "message", "resumeFileName", "resumeBlobPath", "submittedAt", "evaluation", "review", "decision"}
         assert body["evaluation"] is None and body["decision"] is None
 
         listed = client.get("/jobs/senior-product-designer/applications")

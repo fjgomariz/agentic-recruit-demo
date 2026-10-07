@@ -5,6 +5,7 @@ from .agents import (
     AgentResponseError,
     AgentUnavailableError,
     CandidateEvaluationAgentService,
+    CandidateReviewAgentService,
     JobDescriptionAgentService,
 )
 from .applications import ApplicationNotAllowedError, ApplicationService
@@ -18,6 +19,7 @@ __all__ = [
     "ApplicationNotAllowedError",
     "ApplicationService",
     "CandidateEvaluationAgentService",
+    "CandidateReviewAgentService",
     "CrudService",
     "EntityAlreadyExistsError",
     "EntityNotFoundError",

@@ -15,12 +15,17 @@ from app.config import AgentSettings
 from app.domain import (
     AgentExecution,
     AgentExecutionStatus,
+    ApplicationEvaluation,
     EvaluationRecommendation,
     Job,
     JobApplication,
     JobDescriptionDraft,
     JobDescriptionDraftResult,
     JobDescriptionRequest,
+    ReviewAgreement,
+    ReviewConfidence,
+    ReviewFindingSeverity,
+    ReviewFindingType,
 )
 from app.domain.models import _to_camel
 
@@ -72,6 +77,7 @@ class AgentRun:
     duration_ms: int
     input_tokens: int | None
     output_tokens: int | None
+    model: str | None = None
 
 
 def build_agent_input(request: JobDescriptionRequest) -> str:
@@ -198,6 +204,7 @@ class FoundryAgent:
             duration_ms=int((time.perf_counter() - start) * 1000),
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),
+            model=getattr(response, "model", None) if isinstance(getattr(response, "model", None), str) else None,
         )
         return response, run
 
@@ -212,6 +219,7 @@ class FoundryAgent:
             agent_version=run.agent_version,
             input_tokens=run.input_tokens,
             output_tokens=run.output_tokens,
+            model=run.model,
         )
 
     async def record_invalid_output(self, run: AgentRun, related_entity_ids: list[str]) -> None:
@@ -225,6 +233,7 @@ class FoundryAgent:
             agent_version=run.agent_version,
             input_tokens=run.input_tokens,
             output_tokens=run.output_tokens,
+            model=run.model,
         )
 
     async def _record(
@@ -240,11 +249,12 @@ class FoundryAgent:
         agent_version: str | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        model: str | None = None,
     ) -> None:
         execution = AgentExecution(
             id=id,
             agent_name=self.agent_name,
-            model=self._model,
+            model=model or self._model,
             status=status,
             started_at=started_at,
             completed_at=datetime.now(UTC),
@@ -334,16 +344,7 @@ class CandidateEvaluationAgentService:
 
     async def evaluate(self, job: Job, application: JobApplication, resume: bytes) -> CandidateEvaluationResult:
         related = [application.id, job.id]
-        file_data = base64.b64encode(resume).decode("ascii")
-        agent_input = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": build_evaluation_input(job, application)},
-                    {"type": "input_file", "filename": application.resume_file_name, "file_data": f"data:application/pdf;base64,{file_data}"},
-                ],
-            }
-        ]
+        agent_input = [{"role": "user", "content": [{"type": "input_text", "text": build_evaluation_input(job, application)}, _pdf_part(application, resume)]}]
         response, run = await self._agent.run(agent_input, related_entity_ids=related)
 
         try:
@@ -361,3 +362,92 @@ class CandidateEvaluationAgentService:
             status=AgentExecutionStatus.NEEDS_REVIEW if needs_review else AgentExecutionStatus.COMPLETED,
         )
         return CandidateEvaluationResult(output=output, run=run)
+
+
+def _pdf_part(application: JobApplication, resume: bytes) -> dict[str, str]:
+    file_data = base64.b64encode(resume).decode("ascii")
+    return {"type": "input_file", "filename": application.resume_file_name, "file_data": f"data:application/pdf;base64,{file_data}"}
+
+
+def evaluation_for_review(evaluation: ApplicationEvaluation) -> dict[str, Any]:
+    """Present the stored evaluation in the evaluator's own output shape, so the reviewer sees exactly what the maker produced."""
+
+    return {
+        "overallScore": evaluation.overall_score,
+        "recommendation": evaluation.recommendation,
+        "summary": evaluation.summary,
+        "strengths": evaluation.strengths,
+        "considerations": evaluation.considerations,
+        "criteria": [{"criterion": score.criterion, "score": score.value, "rationale": score.rationale} for score in evaluation.scores],
+    }
+
+
+def build_review_input(job: Job, application: JobApplication, evaluation: ApplicationEvaluation) -> str:
+    """Render the job posting, candidate message, and the evaluator's output for the reviewer."""
+
+    return "\n".join([
+        build_evaluation_input(job, application),
+        "",
+        "Evaluation from the Candidate Evaluator (untrusted JSON):",
+        json.dumps(evaluation_for_review(evaluation), indent=1),
+    ])
+
+
+class ReviewFindingOutput(_StrictModel):
+    type: ReviewFindingType
+    severity: ReviewFindingSeverity
+    description: str
+
+
+class CandidateReviewOutput(_StrictModel):
+    """Structured output of the reviewer, matching agents/candidate-evaluation-reviewer/output-schema.json."""
+
+    validated_score: int
+    final_recommendation: EvaluationRecommendation
+    agreement: ReviewAgreement
+    confidence: ReviewConfidence
+    summary: str
+    comments: list[str]
+    inconsistencies: list[ReviewFindingOutput]
+
+
+@dataclass(frozen=True)
+class CandidateReviewResult:
+    output: CandidateReviewOutput
+    run: AgentRun
+
+
+class CandidateReviewAgentService:
+    """Check the evaluator's assessment with an independent Foundry agent on a different model."""
+
+    def __init__(self, settings: AgentSettings, client: ResponsesClient | None, recorder: AgentRunRecorder | None = None) -> None:
+        self._agent = FoundryAgent(settings.candidate_review_agent_name, settings.review_model_deployment_name, client, recorder or NullRecorder())
+
+    @property
+    def agent_name(self) -> str:
+        return self._agent.agent_name
+
+    @property
+    def configured(self) -> bool:
+        return self._agent.configured
+
+    async def review(self, job: Job, application: JobApplication, resume: bytes, evaluation: ApplicationEvaluation) -> CandidateReviewResult:
+        related = [application.id, job.id]
+        agent_input = [{"role": "user", "content": [{"type": "input_text", "text": build_review_input(job, application, evaluation)}, _pdf_part(application, resume)]}]
+        response, run = await self._agent.run(agent_input, related_entity_ids=related)
+
+        try:
+            output = CandidateReviewOutput.model_validate(json.loads(response.output_text))
+        except (json.JSONDecodeError, ValidationError, TypeError) as error:
+            logger.exception("Evaluation reviewer returned an invalid review response_id=%s", response.id)
+            await self._agent.record_invalid_output(run, related_entity_ids=related)
+            raise AgentResponseError("The evaluation reviewer returned an invalid review") from error
+
+        changed = f"{evaluation.overall_score} → {output.validated_score}"
+        await self._agent.record_success(
+            run,
+            related_entity_ids=related,
+            output_summary=f"{output.agreement} ({changed}, {output.final_recommendation}); {len(output.inconsistencies)} issue(s) for {job.title}",
+            status=AgentExecutionStatus.NEEDS_REVIEW if output.agreement == ReviewAgreement.DISAGREES else AgentExecutionStatus.COMPLETED,
+        )
+        return CandidateReviewResult(output=output, run=run)

@@ -32,26 +32,32 @@ param recruiterPortalImage string = ''
 @description('Object ID of the identity running the deployment. It receives Foundry User on the project so it can publish agent versions. Empty skips the assignment.')
 param deploymentPrincipalId string = ''
 
-@description('Foundry model deployment used by the agents.')
-param agentModelDeploymentName string = 'gpt-5.4-mini'
-
-@description('OpenAI model behind the agent model deployment.')
-param agentModelName string = 'gpt-5.4-mini'
-
-@description('OpenAI model version behind the agent model deployment.')
-param agentModelVersion string = '2026-03-17'
-
-@description('Agent model deployment SKU.')
-param agentModelSkuName string = 'GlobalStandard'
-
-@description('Agent model capacity in thousands of tokens per minute.')
-param agentModelCapacity int = 50
+@description('Foundry model deployments. The first is the default for agents that do not choose a model. Deployment names must match the "modelDeployment" values in agents/*/agent.json.')
+param agentModelDeployments array = [
+  {
+    name: 'gpt-5.4-mini'
+    model: 'gpt-5.4-mini'
+    version: '2026-03-17'
+    skuName: 'GlobalStandard'
+    capacity: 50
+  }
+  {
+    name: 'gpt-5.4'
+    model: 'gpt-5.4'
+    version: '2026-03-05'
+    skuName: 'GlobalStandard'
+    capacity: 500
+  }
+]
 
 @description('Name of the Foundry agent that drafts job descriptions.')
 param jobDescriptionAgentName string = 'job-description-writer'
 
 @description('Name of the Foundry agent that evaluates candidate resumes.')
 param candidateEvaluationAgentName string = 'candidate-evaluator'
+
+@description('Name of the Foundry agent that reviews candidate evaluations.')
+param candidateReviewAgentName string = 'candidate-evaluation-reviewer'
 
 var deployApps = !empty(apiImage) && !empty(publicPortalImage) && !empty(recruiterPortalImage)
 
@@ -229,11 +235,7 @@ module foundry './modules/foundry.bicep' = {
     location: location
     tags: tags
     applicationInsightsName: monitoring.outputs.applicationInsightsName
-    modelDeploymentName: agentModelDeploymentName
-    modelName: agentModelName
-    modelVersion: agentModelVersion
-    modelSkuName: agentModelSkuName
-    modelCapacity: agentModelCapacity
+    modelDeployments: agentModelDeployments
   }
 }
 
@@ -291,6 +293,7 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundry.outputs.projectEndpoint }
       { name: 'JOB_DESCRIPTION_AGENT_NAME', value: jobDescriptionAgentName }
       { name: 'CANDIDATE_EVALUATION_AGENT_NAME', value: candidateEvaluationAgentName }
+      { name: 'CANDIDATE_REVIEW_AGENT_NAME', value: candidateReviewAgentName }
       { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundry.outputs.modelDeploymentName }
       { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
     ]
@@ -361,6 +364,8 @@ output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundry.outputs.modelDeploymentName
 output JOB_DESCRIPTION_AGENT_NAME string = jobDescriptionAgentName
 output CANDIDATE_EVALUATION_AGENT_NAME string = candidateEvaluationAgentName
+output CANDIDATE_REVIEW_AGENT_NAME string = candidateReviewAgentName
+output AZURE_AI_MODEL_DEPLOYMENT_NAMES array = foundry.outputs.modelDeploymentNames
 output API_URL string = deployApps ? api!.outputs.url : ''
 output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
 output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''

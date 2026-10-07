@@ -1,10 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { ApiError, clearApplicationDecision, decideApplication, evaluateApplication } from "@/data/jobs";
+import type { AiAssessmentRating } from "@domain";
+import { ApiError, clearApplicationDecision, decideApplication, evaluateApplication, reviewApplication } from "@/data/jobs";
 
 /** Demo recruiter identity shown in the portal header; there is no sign-in yet. */
 const recruiter = "Jordan Lee";
+const ratings: AiAssessmentRating[] = ["Accurate", "Partially accurate", "Inaccurate"];
 
 export interface CandidateActionState {
   error?: string;
@@ -19,7 +21,7 @@ function refresh(id: string) {
   revalidatePath(`/candidates/${id}`);
 }
 
-/** Starts the AI evaluation; the page polls until it completes. */
+/** Starts the full AI assessment (evaluator, then reviewer); the page polls until it completes. */
 export async function startEvaluation(id: string): Promise<CandidateActionState> {
   try {
     await evaluateApplication(id);
@@ -30,12 +32,32 @@ export async function startEvaluation(id: string): Promise<CandidateActionState>
   return {};
 }
 
-/** Records Advance or Reject with an optional comment. */
-export async function recordDecision(id: string, _: CandidateActionState, formData: FormData): Promise<CandidateActionState> {
+/** Re-runs only the reviewer agent on the current evaluation. */
+export async function startReview(id: string): Promise<CandidateActionState> {
+  try {
+    await reviewApplication(id);
+  } catch (error) {
+    return failure(error, "The review could not be started. Try again.");
+  }
+  refresh(id);
+  return {};
+}
+
+/** Human approval: records Advance or Reject, the recruiter's rating of the AI assessment, and feedback for the agents. */
+export async function recordDecision(id: string, requiresRating: boolean, _: CandidateActionState, formData: FormData): Promise<CandidateActionState> {
   const status = formData.get("decision");
   if (status !== "Advanced" && status !== "Rejected") return { error: "Choose Advance or Reject." };
+  const rating = formData.get("aiRating");
+  const aiRating = ratings.find((value) => value === rating);
+  if (requiresRating && !aiRating) return { error: "Rate the AI assessment before deciding. Your rating helps improve the agents." };
   try {
-    await decideApplication(id, { status, comment: String(formData.get("comment") ?? "").trim(), decidedBy: recruiter });
+    await decideApplication(id, {
+      status,
+      comment: String(formData.get("comment") ?? "").trim(),
+      decidedBy: recruiter,
+      aiRating: aiRating ?? null,
+      agentFeedback: String(formData.get("agentFeedback") ?? "").trim(),
+    });
   } catch (error) {
     return failure(error, "The decision could not be saved. Try again.");
   }

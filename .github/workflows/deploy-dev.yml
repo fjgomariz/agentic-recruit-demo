@@ -129,6 +129,7 @@ jobs:
           echo
           curl --silent --show-error --fail-with-body --retry 60 --retry-all-errors --retry-delay 6 "${api_url}/jobs" --output /dev/null
           curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${api_url}/agent-executions?limit=1" --output /dev/null
+          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${api_url}/agent-feedback" --output /dev/null
           curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${public_url}/" --output /dev/null
           curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${recruiter_url}/" --output /dev/null
           curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${recruiter_url}/operations" --output /dev/null

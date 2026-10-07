@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["validatedScore", "finalRecommendation", "agreement", "confidence", "summary", "comments", "inconsistencies"],
+  "properties": {
+    "validatedScore": {
+      "type": "integer",
+      "description": "Validated overall fit from 0 to 100."
+    },
+    "finalRecommendation": {
+      "type": "string",
+      "enum": ["Strong match", "Possible match", "Not a match", "Needs manual review"]
+    },
+    "agreement": {
+      "type": "string",
+      "enum": ["Agrees", "Partially agrees", "Disagrees"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["High", "Medium", "Low"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "comments": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "inconsistencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "severity", "description"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["Unsupported claim", "Missed evidence", "Score mismatch", "Potential bias", "Overconfidence"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["Low", "Medium", "High"]
+          },
+          "description": { "type": "string" }
+        }
+      }
+    }
+  }
+}

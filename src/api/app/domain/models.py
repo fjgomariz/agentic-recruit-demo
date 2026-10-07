@@ -300,6 +300,7 @@ class ApplicationEvaluation(DomainModel):
     agent_name: str
     agent_version: str | None = None
     agent_execution_id: str | None = None
+    model: str | None = None
     overall_score: int | None = Field(default=None, ge=0, le=100)
     recommendation: EvaluationRecommendation | None = None
     summary: str | None = None
@@ -309,13 +310,81 @@ class ApplicationEvaluation(DomainModel):
     error_message: str | None = None
 
 
+class ReviewAgreement(StrEnum):
+    """How far the reviewer agrees with the evaluator."""
+
+    AGREES = "Agrees"
+    PARTIALLY_AGREES = "Partially agrees"
+    DISAGREES = "Disagrees"
+
+
+class ReviewConfidence(StrEnum):
+    HIGH = "High"
+    MEDIUM = "Medium"
+    LOW = "Low"
+
+
+class ReviewFindingType(StrEnum):
+    UNSUPPORTED_CLAIM = "Unsupported claim"
+    MISSED_EVIDENCE = "Missed evidence"
+    SCORE_MISMATCH = "Score mismatch"
+    POTENTIAL_BIAS = "Potential bias"
+    OVERCONFIDENCE = "Overconfidence"
+
+
+class ReviewFindingSeverity(StrEnum):
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+
+
+class ReviewFinding(DomainModel):
+    """One inconsistency the reviewer found in the evaluation."""
+
+    type: ReviewFindingType
+    severity: ReviewFindingSeverity
+    description: str
+
+
+class ApplicationReview(DomainModel):
+    """Checker-agent review of the evaluation, embedded in the application document."""
+
+    status: EvaluationStatus
+    started_at: datetime
+    completed_at: datetime | None = None
+    agent_name: str
+    agent_version: str | None = None
+    agent_execution_id: str | None = None
+    model: str | None = None
+    reviewed_evaluation_id: str | None = None
+    original_score: int | None = Field(default=None, ge=0, le=100)
+    validated_score: int | None = Field(default=None, ge=0, le=100)
+    final_recommendation: EvaluationRecommendation | None = None
+    agreement: ReviewAgreement | None = None
+    confidence: ReviewConfidence | None = None
+    summary: str | None = None
+    comments: list[str] = Field(default_factory=list)
+    inconsistencies: list[ReviewFinding] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+AiAssessmentRating = Literal["Accurate", "Partially accurate", "Inaccurate"]
+
+
 class ApplicationDecision(DomainModel):
-    """Recruiter decision on an application; the AI evaluation is advisory only."""
+    """Recruiter approval: the final decision plus a snapshot of the AI advice it was based on."""
 
     status: Literal["Advanced", "Rejected"]
     comment: str = Field(default="", max_length=1000)
     decided_by: str = Field(default="Recruiter", min_length=1, max_length=120)
     decided_at: datetime
+    ai_rating: AiAssessmentRating | None = None
+    agent_feedback: str = Field(default="", max_length=2000)
+    ai_recommendation: EvaluationRecommendation | None = None
+    ai_score: int | None = Field(default=None, ge=0, le=100)
+    followed_ai: bool | None = None
+    evaluation_execution_id: str | None = None
+    review_execution_id: str | None = None
 
 
 class ApplicationDecisionRequest(DomainModel):
@@ -324,6 +393,26 @@ class ApplicationDecisionRequest(DomainModel):
     status: Literal["Advanced", "Rejected"]
     comment: str = Field(default="", max_length=1000)
     decided_by: str = Field(default="Recruiter", min_length=1, max_length=120)
+    ai_rating: AiAssessmentRating | None = None
+    agent_feedback: str = Field(default="", max_length=2000)
+
+
+class AgentFeedback(DomainModel):
+    """Recruiter feedback on the AI workflow for one decision, without candidate personal data."""
+
+    application_id: str
+    job_id: str
+    decided_at: datetime
+    decision: Literal["Advanced", "Rejected"]
+    ai_recommendation: EvaluationRecommendation | None = None
+    followed_ai: bool | None = None
+    ai_rating: AiAssessmentRating | None = None
+    agent_feedback: str = ""
+    evaluation_score: int | None = None
+    validated_score: int | None = None
+    reviewer_agreement: ReviewAgreement | None = None
+    evaluator_version: str | None = None
+    reviewer_version: str | None = None
 
 
 class JobApplication(DomainModel):
@@ -338,4 +427,5 @@ class JobApplication(DomainModel):
     resume_blob_path: str
     submitted_at: datetime
     evaluation: ApplicationEvaluation | None = None
+    review: ApplicationReview | None = None
     decision: ApplicationDecision | None = None

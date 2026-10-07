@@ -5,13 +5,27 @@ Each subfolder is one Foundry prompt agent, deployed by `deploy.py` to the proje
 | Agent | Purpose | Called by | Model |
 | --- | --- | --- | --- |
 | `job-description-writer` | Drafts a complete job posting (summary, description, responsibilities, qualifications) from role facts and recruiter notes. | `POST /job-description-drafts` | `gpt-5.4-mini` (GlobalStandard) |
-| `candidate-evaluator` | Scores a PDF resume against a job posting from 0 to 100, explains strengths, considerations, and per-requirement evidence, and recommends `Strong match`, `Possible match`, `Not a match`, or `Needs manual review`. | Automatically after each application, and `POST /applications/{id}/evaluation` | `gpt-5.4-mini` (GlobalStandard) |
+| `candidate-evaluator` | **Maker.** Scores a PDF resume against a job posting from 0 to 100, explains strengths, considerations, and per-requirement evidence, and recommends `Strong match`, `Possible match`, `Not a match`, or `Needs manual review`. | Automatically after each application, and `POST /applications/{id}/evaluation` | `gpt-5.4-mini` (GlobalStandard) |
+| `candidate-evaluation-reviewer` | **Checker.** Re-reads the resume and job, verifies every claim and score in the evaluation, flags unsupported claims, missed evidence, score mismatches, potential bias, and overconfidence, and returns a validated score, agreement, confidence, comments, and the final recommendation. | Automatically after a completed evaluation, and `POST /applications/{id}/review` | `gpt-5.4` (GlobalStandard) |
+
+## Assessment workflow
+
+```text
+Application ──► candidate-evaluator (gpt-5.4-mini) ──► candidate-evaluation-reviewer (gpt-5.4) ──► Recruiter approval
+                 maker: score + evidence                checker: validated score, findings          decision + rating + feedback
+```
+
+1. **Evaluate.** The evaluator scores the resume (about 5–8 seconds).
+2. **Review.** When the evaluation completes, the API hands it to the reviewer with the same job, message, and PDF (about 10–20 seconds). A different, larger model reduces correlated mistakes: the checker does not simply agree with the maker. Evaluations routed to manual review (prompt injection or unreadable PDF) skip this step.
+3. **Approve.** The recruiter sees both reports and the validated recommendation, rates how accurate the AI assessment was, optionally writes feedback for the agents, and decides **Advance** or **Reject**. The decision stores a snapshot of the AI advice it was based on (recommendation, score, and both run IDs) and whether the recruiter followed or overrode a clear-cut recommendation.
+
+The ratings and feedback form a loop for continuous improvement: `GET /agent-feedback` returns them per decision with the evaluator and reviewer versions, without candidate personal data, and the AI Operations page summarizes them. Use them to tune prompts and to build evaluation datasets for new agent versions.
 
 ## Agent definition
 
 | File | Content |
 | --- | --- |
-| `agent.json` | Agent name, description, reasoning effort, and file references. |
+| `agent.json` | Agent name, description, reasoning effort, file references, and an optional `modelDeployment` (defaults to `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `gpt-5.4-mini`). The deployment must exist in `agentModelDeployments` in `infra/main.bicep`. |
 | `instructions.md` | System prompt. |
 | `output-schema.json` | Strict JSON schema for the response. The API test suite checks each schema matches its API model. |
 
@@ -24,6 +38,13 @@ Agents are immutable and versioned. `deploy.py` hashes the model, instructions, 
 - **Fairness:** the prompt limits scoring to job-relevant evidence and forbids using or inferring protected characteristics, and raising work authorization, location, or work arrangement unless the resume contradicts an explicit requirement.
 - **Prompt injection:** the resume and message are treated as untrusted data. Azure AI Content Safety's prompt shields block resumes that contain instructions aimed at the screening system before they reach the model; the API stores those as **Needs manual review** instead of failing. `samples/resumes/lena-fischer-visual-designer.pdf` demonstrates this.
 - **Variance:** scores can differ by a few points between runs of the same resume; recommendations are stable.
+
+## Evaluation reviewer
+
+- **Input:** the job posting, the candidate message, the resume PDF, and the evaluator's output in its original JSON shape, marked as untrusted.
+- **Rules:** verify, do not trust; keep the original score when it is reasonable; do not invent problems. `agreement` is `Agrees` (same recommendation, score within 5 points), `Partially agrees` (same recommendation, larger change or medium/high findings), or `Disagrees` (different recommendation).
+- **Proof that it works:** with a deliberately corrupted evaluation of `tom-becker-junior-frontend-developer.pdf` (score raised to 78, an invented design-system strength, a location remark, and the word "young"), the reviewer returned 10 / `Not a match` / `Disagrees` and flagged the unsupported claim, the score mismatch, the location and age bias, and the overconfidence. On honest evaluations it agrees and reports no issues.
+- **Model pinning:** `gpt-5.4` (version `2026-03-05`) is deployed with `NoAutoUpgrade`, so the checker's behavior only changes through a reviewed version bump.
 
 ## Publish manually
 

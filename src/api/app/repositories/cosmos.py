@@ -190,15 +190,16 @@ class CosmosApplicationRepository:
             return JobApplication.model_validate(item)
         return None
 
-    async def set_field(self, application: JobApplication, field: str, value: BaseModel | None) -> JobApplication:
-        """Set one top-level field with a partial update, so evaluation and decision writes never overwrite each other."""
+    async def set_fields(self, application: JobApplication, fields: dict[str, BaseModel | None]) -> JobApplication:
+        """Set top-level fields with one partial update, so assessment steps never overwrite each other."""
 
-        serialized = value.model_dump(mode="json", by_alias=True, exclude_none=True) if value is not None else None
-        item = await self._get_container().patch_item(
-            item=application.id,
-            partition_key=application.job_id,
-            patch_operations=[{"op": "set", "path": f"/{field}", "value": serialized}],
-        )
+        operations = [
+            {"op": "set", "path": f"/{name}", "value": value.model_dump(mode="json", by_alias=True, exclude_none=True) if value is not None else None}
+            for name, value in fields.items()
+        ]
+        if not operations:
+            return application
+        item = await self._get_container().patch_item(item=application.id, partition_key=application.job_id, patch_operations=operations)
         return JobApplication.model_validate(item)
 
     def _get_container(self) -> Any:

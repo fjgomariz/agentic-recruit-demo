@@ -56,7 +56,9 @@ class AgentSettings:
     project_endpoint: str | None
     job_description_agent_name: str = "job-description-writer"
     candidate_evaluation_agent_name: str = "candidate-evaluator"
+    candidate_review_agent_name: str = "candidate-evaluation-reviewer"
     model_deployment_name: str = "gpt-5.4-mini"
+    review_model_deployment_name: str = "gpt-5.4"
 
     @classmethod
     def from_environment(cls) -> "AgentSettings":
@@ -66,5 +68,6 @@ class AgentSettings:
             project_endpoint=os.getenv("AZURE_AI_PROJECT_ENDPOINT") or None,
             job_description_agent_name=os.getenv("JOB_DESCRIPTION_AGENT_NAME", "job-description-writer"),
             candidate_evaluation_agent_name=os.getenv("CANDIDATE_EVALUATION_AGENT_NAME", "candidate-evaluator"),
+            candidate_review_agent_name=os.getenv("CANDIDATE_REVIEW_AGENT_NAME", "candidate-evaluation-reviewer"),
             model_deployment_name=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-5.4-mini"),
         )

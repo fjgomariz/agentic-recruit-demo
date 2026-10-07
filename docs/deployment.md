@@ -24,7 +24,7 @@ When the three image parameters are empty (for example a local `azd provision` w
 
 | App | Port | Probes | Configuration |
 | --- | --- | --- | --- |
-| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor, Storage Blob Data Contributor on the `resumes` container, and **Foundry User** on the Foundry project; Cosmos and Blob Storage settings, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `JOB_DESCRIPTION_AGENT_NAME`, `CANDIDATE_EVALUATION_AGENT_NAME`, and `OTEL_SERVICE_NAME`. Agent runs are traced server-side by Foundry; the SDK's client-side GenAI instrumentor is not enabled (see [agents/README.md](../agents/README.md)). `APPLICATIONINSIGHTS_CONNECTION_STRING` is stored as a Container Apps secret. |
+| `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor, Storage Blob Data Contributor on the `resumes` container, and **Foundry User** on the Foundry project; Cosmos and Blob Storage settings, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `JOB_DESCRIPTION_AGENT_NAME`, `CANDIDATE_EVALUATION_AGENT_NAME`, `CANDIDATE_REVIEW_AGENT_NAME`, and `OTEL_SERVICE_NAME`. Agent runs are traced server-side by Foundry; the SDK's client-side GenAI instrumentor is not enabled (see [agents/README.md](../agents/README.md)). `APPLICATIONINSIGHTS_CONNECTION_STRING` is stored as a Container Apps secret. |
 | `ca-recruitment-public-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
 | `ca-recruitment-recruiter-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
 

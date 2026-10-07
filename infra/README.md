@@ -31,7 +31,7 @@ The Container Apps environment remains externally accessible and has public netw
 | Container Apps environment | External workload-profiles environment integrated with the dedicated subnet. Environment logs flow to Log Analytics. |
 | API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account, Storage Blob Data Contributor on the `resumes` container, and Foundry User on the Foundry project. |
 | Foundry account and project | AI Services account (`aif-…`, keys disabled) with the `proj-recruitment-<env>` project that hosts the prompt agents in `agents/`. The deployment identity gets Foundry User on the project to publish agent versions. |
-| Model deployment | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM by default) used by the agents. Auto-upgrade is disabled. |
+| Model deployments | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM) for the job description writer and the candidate evaluator, and `gpt-5.4` (version `2026-03-05`, GlobalStandard, 500K TPM) for the evaluation reviewer. Declared in `agentModelDeployments`, created one at a time, and pinned with auto-upgrade disabled. |
 | Application Insights connection | Project connection that enables Foundry server-side agent tracing into the shared Application Insights resource. |
 | Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. Deployed only when image parameters are supplied. |
 

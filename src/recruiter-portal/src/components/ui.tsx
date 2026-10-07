@@ -19,6 +19,10 @@ const badgeStyles: Record<string, string> = {
   Failed: "bg-rose-50 text-rose-700",
   "Needs review": "bg-rose-50 text-rose-700",
   Closed: "bg-slate-100 text-slate-600",
+  Accurate: "bg-emerald-50 text-emerald-700",
+  "Partially accurate": "bg-amber-50 text-amber-700",
+  Inaccurate: "bg-rose-50 text-rose-700",
+  "Reviewing…": "bg-violet-50 text-violet-700",
 };
 
 export function StatusBadge({ status }: { status: string }) {
