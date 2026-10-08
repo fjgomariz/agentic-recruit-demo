@@ -52,6 +52,8 @@ var probeTarget = empty(healthPath)
   ? { tcpSocket: { port: targetPort } }
   : { httpGet: { path: healthPath, port: targetPort } }
 
+var azureCliClientId = '04b07795-8ddb-461a-bbee-02f9e1bf7b46'
+
 resource app 'Microsoft.App/containerApps@2025-07-01' = {
   name: name
   location: location
@@ -138,6 +140,12 @@ resource auth 'Microsoft.App/containerApps/authConfigs@2025-07-01' = if (!empty(
         registration: {
           clientId: authClientId
           openIdIssuer: '${environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
+        }
+        validation: {
+          defaultAuthorizationPolicy: {
+            // Interactive sign-ins, plus Azure CLI tokens for scripted access by the same assigned users.
+            allowedApplications: [ authClientId, azureCliClientId ]
+          }
         }
       }
     }

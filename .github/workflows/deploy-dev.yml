@@ -129,20 +129,22 @@ jobs:
             # Unauthenticated health path: the portal reaches the internal API, which reads Cosmos DB.
             curl --silent --show-error --fail-with-body --retry 30 --retry-all-errors --retry-delay 6 "${portal_url}/api/health"
             echo
-            # Every other path must redirect to Microsoft Entra sign-in.
-            result="$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' "${portal_url}/")"
+            # Every other path must send a browser to Microsoft Entra sign-in (non-browser clients get 401).
+            result="$(curl --silent --output /dev/null --user-agent 'Mozilla/5.0' --header 'Accept: text/html' \
+              --write-out '%{http_code} %{redirect_url}' "${portal_url}/")"
             case "$result" in
               "302 https://login.microsoftonline.com/"*) echo "${portal_url} requires sign-in" ;;
               *) echo "::error::${portal_url} is not protected by sign-in (got: ${result})"; exit 1 ;;
             esac
           done
 
-          # The API has internal ingress only, so it must not answer from the internet.
-          if curl --silent --max-time 15 --output /dev/null "${api_url}/health"; then
+          # The API has internal ingress only: from the internet the environment answers 404 (or the name does not resolve).
+          api_status="$(curl --silent --max-time 15 --output /dev/null --write-out '%{http_code}' "${api_url}/health" || true)"
+          if [ "$api_status" = "200" ]; then
             echo "::error::The API answered from the internet: ${api_url}"
             exit 1
           fi
-          echo "API is not reachable from the internet"
+          echo "API is not reachable from the internet (HTTP ${api_status})"
 
           {
             echo "### Deployed ${GITHUB_SHA::7}"

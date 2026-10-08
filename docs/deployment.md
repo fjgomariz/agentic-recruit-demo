@@ -49,12 +49,11 @@ The app registration is created once with an account that can register applicati
 ./infra/scripts/setup-auth.ps1 -EnvironmentName dev -AllowedUsers alice@contoso.com        # allows more users
 ```
 
-The script is idempotent. It sets the portals' `/.auth/login/aad/callback` redirect URIs, enables ID tokens, requires assignment, and assigns the users. It also exposes a `user_impersonation` scope that is pre-authorized for the Azure CLI, so an allowed user can call a portal from a script:
+The script is idempotent. It sets the portals' `/.auth/login/aad/callback` redirect URIs, enables ID tokens, requires assignment, and assigns the users. It also exposes a `user_impersonation` scope that is pre-authorized for the Azure CLI (and the portals accept Azure CLI tokens), so an allowed user can call a portal from a script:
 
 ```powershell
 $token = az account get-access-token --scope "api://<client-id>/user_impersonation" --query accessToken -o tsv
-$session = (Invoke-RestMethod -Method Post "$portalUrl/.auth/login/aad" -ContentType application/json -Body (@{ access_token = $token } | ConvertTo-Json)).authenticationToken
-Invoke-WebRequest "$portalUrl/candidates" -Headers @{ 'X-ZUMO-AUTH' = $session }
+Invoke-WebRequest "$portalUrl/candidates" -Headers @{ Authorization = "Bearer $token" }
 ```
 
 The client ID is not a secret and is committed as the default of `AZURE_AUTH_CLIENT_ID` in `infra/main.parameters.json`; override it with `azd env set AZURE_AUTH_CLIENT_ID <id>` for another environment. To give someone access later, add them with `-AllowedUsers` or under **Enterprise applications → Users and groups** in the Entra admin center. To open the careers portal to anonymous candidates, remove `authClientId` from the `publicPortal` module in `infra/main.bicep`.
