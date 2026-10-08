@@ -59,6 +59,9 @@ param candidateEvaluationAgentName string = 'candidate-evaluator'
 @description('Name of the Foundry agent that reviews candidate evaluations.')
 param candidateReviewAgentName string = 'candidate-evaluation-reviewer'
 
+@description('Client ID of the Microsoft Entra app registration that protects both portals (created by infra/scripts/setup-auth.ps1). Empty leaves the portals open; the API is never exposed to the internet.')
+param authClientId string = ''
+
 var deployApps = !empty(apiImage) && !empty(publicPortalImage) && !empty(recruiterPortalImage)
 
 var workloadName = 'recruitment'
@@ -280,6 +283,8 @@ module api './modules/container-app.bicep' = if (deployApps) {
     image: apiImage
     targetPort: 8000
     healthPath: '/health'
+    // Only the portals call the API, from their servers, so it stays internal to the environment.
+    external: false
     userAssignedIdentityId: apiIdentity.outputs.id
     env: [
       { name: 'AZURE_CLIENT_ID', value: apiIdentity.outputs.clientId }
@@ -312,6 +317,8 @@ module publicPortal './modules/container-app.bicep' = if (deployApps) {
     environmentId: containerApps.outputs.environmentId
     image: publicPortalImage
     targetPort: 3000
+    authClientId: authClientId
+    authExcludedPaths: [ '/api/health' ]
     env: [
       { name: 'API_BASE_URL', value: api!.outputs.url }
     ]
@@ -327,6 +334,8 @@ module recruiterPortal './modules/container-app.bicep' = if (deployApps) {
     environmentId: containerApps.outputs.environmentId
     image: recruiterPortalImage
     targetPort: 3000
+    authClientId: authClientId
+    authExcludedPaths: [ '/api/health' ]
     env: [
       { name: 'API_BASE_URL', value: api!.outputs.url }
     ]
@@ -366,7 +375,7 @@ output JOB_DESCRIPTION_AGENT_NAME string = jobDescriptionAgentName
 output CANDIDATE_EVALUATION_AGENT_NAME string = candidateEvaluationAgentName
 output CANDIDATE_REVIEW_AGENT_NAME string = candidateReviewAgentName
 output AZURE_AI_MODEL_DEPLOYMENT_NAMES array = foundry.outputs.modelDeploymentNames
-output API_URL string = deployApps ? api!.outputs.url : ''
+output API_URL string = deployApps ? api!.outputs.url : '' // Internal: reachable only from the portals.
 output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
 output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''
 

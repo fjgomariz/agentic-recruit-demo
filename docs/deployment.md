@@ -8,14 +8,14 @@ Every pull request validates infrastructure and applications. Every push to `mai
 | --- | --- |
 | `validate-infra.yml` | Compiles Bicep and parameter files, parses `azure.yaml`, runs Azure what-if, and rejects resource deletions. |
 | `validate-apps.yml` | Lints and builds both Next.js portals, tests and packages FastAPI, and builds all three container images. |
-| `deploy-dev.yml` | Builds and pushes the three images in parallel (with layer cache), runs `azd provision` with the new image tags, publishes the Foundry agents, and smoke-tests the endpoints including one agent call. |
+| `deploy-dev.yml` | Builds and pushes the three images in parallel (with layer cache), runs `azd provision` with the new image tags, publishes the Foundry agents, and smoke-tests the deployment, including that the portals require sign-in and the API is not reachable from the internet. |
 
 ## How a deployment works
 
 1. **images** job (matrix of three): `docker/build-push-action` builds `src/<service>/Dockerfile` and pushes `ghcr.io/<owner>/recruitment-foundry-<service>:<sha>`. BuildKit layer cache is stored in the GitHub Actions cache, so unchanged layers are not rebuilt.
 2. **deploy** job: signs in with OIDC, sets `API_IMAGE`, `PUBLIC_PORTAL_IMAGE`, `RECRUITER_PORTAL_IMAGE`, and `AZURE_PRINCIPAL_ID` (the OIDC identity's object ID) in the azd environment, and runs `azd provision`. `infra/main.parameters.json` maps these values to the Bicep parameters. A new image tag always produces a new Container Apps revision; ARM waits until that revision is healthy (or fails with the platform error).
 3. `agents/deploy.py` publishes every agent in `agents/` to the Foundry project. A new agent version is created only when its model, instructions, schema, or reasoning settings change.
-4. Smoke tests call `API /health`, `API /jobs`, both portal home pages, and `POST /job-description-drafts`, which runs the agent with the API's managed identity. The job summary lists the three URLs.
+4. Smoke tests call each portal's unauthenticated `/api/health` (portal → internal API → Cosmos DB), check that every other portal path redirects to Microsoft Entra sign-in, and check that the API does not answer from the internet. The job summary lists the three URLs.
 5. On failure, the job prints the revision list plus system and console logs of each Container App.
 
 When the three image parameters are empty (for example a local `azd provision` without them), only the shared foundation is deployed and existing apps are left untouched.
@@ -25,12 +25,39 @@ When the three image parameters are empty (for example a local `azd provision` w
 | App | Port | Probes | Configuration |
 | --- | --- | --- | --- |
 | `ca-recruitment-api-<env>` | `8000` | HTTP `/health` | User-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor, Storage Blob Data Contributor on the `resumes` container, and **Foundry User** on the Foundry project; Cosmos and Blob Storage settings, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `JOB_DESCRIPTION_AGENT_NAME`, `CANDIDATE_EVALUATION_AGENT_NAME`, `CANDIDATE_REVIEW_AGENT_NAME`, and `OTEL_SERVICE_NAME`. Agent runs are traced server-side by Foundry; the SDK's client-side GenAI instrumentor is not enabled (see [agents/README.md](../agents/README.md)). `APPLICATIONINSIGHTS_CONNECTION_STRING` is stored as a Container Apps secret. |
-| `ca-recruitment-public-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
-| `ca-recruitment-recruiter-<env>` | `3000` | TCP | `API_BASE_URL` set to the API HTTPS URL. |
+| `ca-recruitment-public-<env>` | `3000` | TCP | `API_BASE_URL` set to the internal API URL. Microsoft Entra sign-in required except for `/api/health`. |
+| `ca-recruitment-recruiter-<env>` | `3000` | TCP | `API_BASE_URL` set to the internal API URL. Microsoft Entra sign-in required except for `/api/health`. |
+
+The API has **internal ingress**: only apps in the same Container Apps environment can call it, and it has no route from the internet. Both portals call it from their servers, never from the browser.
 
 The ingress target port, the probe port, and the `PORT` environment variable always come from the same Bicep value, so they cannot drift apart. Each app runs with one minimum replica so revisions activate immediately and the demo stays warm.
 
 The Cosmos DB `jobs` container is provisioned by Bicep. Entra ID data-plane roles cannot create databases or containers, so the API only binds to existing resources. The API connects to Cosmos DB in the background: `/health` answers immediately and job endpoints return `503` until the connection (including RBAC propagation on first deployment) succeeds.
+
+## Access and sign-in
+
+The demo is not public. Both portals use Container Apps built-in authentication with a single-tenant Microsoft Entra app registration (`Recruitment Foundry Demo (<env>)`) in the subscription's tenant:
+
+- **User assignment is required**, so only users assigned to the app can sign in; everyone else in the tenant is refused by Microsoft Entra ID.
+- There is **no client secret**: the platform signs users in with the OpenID Connect ID token flow, so nothing has to be stored or rotated.
+- The recruiter portal shows the signed-in user and records recruiter decisions under their name. Local development has no sign-in and uses the demo recruiter Jordan Lee.
+
+The app registration is created once with an account that can register applications (any member or guest of the tenant by default), after the portals exist:
+
+```powershell
+./infra/scripts/setup-auth.ps1 -EnvironmentName dev                                       # allows the signed-in user
+./infra/scripts/setup-auth.ps1 -EnvironmentName dev -AllowedUsers alice@contoso.com        # allows more users
+```
+
+The script is idempotent. It sets the portals' `/.auth/login/aad/callback` redirect URIs, enables ID tokens, requires assignment, and assigns the users. It also exposes a `user_impersonation` scope that is pre-authorized for the Azure CLI, so an allowed user can call a portal from a script:
+
+```powershell
+$token = az account get-access-token --scope "api://<client-id>/user_impersonation" --query accessToken -o tsv
+$session = (Invoke-RestMethod -Method Post "$portalUrl/.auth/login/aad" -ContentType application/json -Body (@{ access_token = $token } | ConvertTo-Json)).authenticationToken
+Invoke-WebRequest "$portalUrl/candidates" -Headers @{ 'X-ZUMO-AUTH' = $session }
+```
+
+The client ID is not a secret and is committed as the default of `AZURE_AUTH_CLIENT_ID` in `infra/main.parameters.json`; override it with `azd env set AZURE_AUTH_CLIENT_ID <id>` for another environment. To give someone access later, add them with `-AllowedUsers` or under **Enterprise applications → Users and groups** in the Entra admin center. To open the careers portal to anonymous candidates, remove `authClientId` from the `publicPortal` module in `infra/main.bicep`.
 
 ## One-time GitHub configuration
 

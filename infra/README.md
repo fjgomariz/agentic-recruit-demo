@@ -6,8 +6,9 @@ This folder contains the Azure Developer CLI (`azd`) and modular Bicep foundatio
 
 ```text
 Internet
-└── Public HTTPS ingress: API (8000), public portal (3000), recruiter portal (3000)
+└── HTTPS ingress with Microsoft Entra sign-in: public portal (3000), recruiter portal (3000)
     └── External workload-profiles Container Apps environment
+        ├── Internal-only ingress: API (8000), called by the portals' servers
         └── Dedicated VNet integration subnet (/23)
             ├── Blob private endpoint → Storage account
             └── Cosmos SQL private endpoint → Cosmos DB for NoSQL
@@ -15,7 +16,7 @@ Internet
 
 The VNet also contains a separate private-endpoints subnet. Private DNS zones for Blob Storage and Cosmos DB are linked to the VNet, so workloads use the normal service hostnames while data traffic resolves to private endpoint IP addresses. The three Container Apps are deployed by the same template when the `apiImage`, `publicPortalImage`, and `recruiterPortalImage` parameters are set; see [docs/deployment.md](../docs/deployment.md).
 
-The Container Apps environment remains externally accessible and has public network access enabled. The environment itself has no private endpoint and is not internal-only.
+The Container Apps environment remains externally accessible and has public network access enabled, but only the two portals have external ingress and both require Microsoft Entra sign-in (see [Access and sign-in](../docs/deployment.md#access-and-sign-in)). The API has internal ingress and cannot be reached from the internet.
 
 ## Resource purposes
 
@@ -33,7 +34,7 @@ The Container Apps environment remains externally accessible and has public netw
 | Foundry account and project | AI Services account (`aif-…`, keys disabled) with the `proj-recruitment-<env>` project that hosts the prompt agents in `agents/`. The deployment identity gets Foundry User on the project to publish agent versions. |
 | Model deployments | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM) for the job description writer and the candidate evaluator, and `gpt-5.4` (version `2026-03-05`, GlobalStandard, 500K TPM) for the evaluation reviewer. Declared in `agentModelDeployments`, created one at a time, and pinned with auto-upgrade disabled. |
 | Application Insights connection | Project connection that enables Foundry server-side agent tracing into the shared Application Insights resource. |
-| Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. Deployed only when image parameters are supplied. |
+| Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. The API ingress is internal; the portals use built-in Microsoft Entra authentication (`authConfigs`) when `authClientId` is set. Deployed only when image parameters are supplied. |
 
 ## Layout
 
@@ -118,7 +119,7 @@ Private DNS resolution can only be proven from inside the VNet. Run `nslookup` o
 
 ## Outputs and authentication
 
-The deployment outputs safe names, hostnames, resource IDs, and the three app URLs (`API_URL`, `PUBLIC_PORTAL_URL`, `RECRUITER_PORTAL_URL`). Account keys, Cosmos DB keys, credentials, and data-service connection strings are not exposed.
+The deployment outputs safe names, hostnames, resource IDs, and the three app URLs (`API_URL` is the internal API address, `PUBLIC_PORTAL_URL`, `RECRUITER_PORTAL_URL`). Account keys, Cosmos DB keys, credentials, and data-service connection strings are not exposed.
 
 The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos DB Built-in Data Contributor at the account scope. That role allows item operations only, which is why the `jobs`, `applications`, and `agent-executions` containers are provisioned in Bicep. The identity also has Storage Blob Data Contributor scoped to the `resumes` container only.
 

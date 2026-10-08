@@ -125,33 +125,32 @@ jobs:
           public_url="$(azd env get-value PUBLIC_PORTAL_URL)"
           recruiter_url="$(azd env get-value RECRUITER_PORTAL_URL)"
 
-          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${api_url}/health"
-          echo
-          curl --silent --show-error --fail-with-body --retry 60 --retry-all-errors --retry-delay 6 "${api_url}/jobs" --output /dev/null
-          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${api_url}/agent-executions?limit=1" --output /dev/null
-          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${api_url}/agent-feedback" --output /dev/null
-          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${public_url}/" --output /dev/null
-          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${recruiter_url}/" --output /dev/null
-          curl --silent --show-error --fail-with-body --retry 10 --retry-all-errors --retry-delay 6 "${recruiter_url}/operations" --output /dev/null
+          for portal_url in "$public_url" "$recruiter_url"; do
+            # Unauthenticated health path: the portal reaches the internal API, which reads Cosmos DB.
+            curl --silent --show-error --fail-with-body --retry 30 --retry-all-errors --retry-delay 6 "${portal_url}/api/health"
+            echo
+            # Every other path must redirect to Microsoft Entra sign-in.
+            result="$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' "${portal_url}/")"
+            case "$result" in
+              "302 https://login.microsoftonline.com/"*) echo "${portal_url} requires sign-in" ;;
+              *) echo "::error::${portal_url} is not protected by sign-in (got: ${result})"; exit 1 ;;
+            esac
+          done
 
-          # Exercises the API identity's Foundry permissions, which can take minutes to apply on first deploy.
-          draft_file="$RUNNER_TEMP/job-description-draft.json"
-          if ! curl --silent --show-error --fail-with-body --retry 20 --retry-all-errors --retry-delay 15 --max-time 90 \
-            --header "Content-Type: application/json" \
-            --data '{"title":"Smoke Test Engineer","experienceLevel":"Mid","notes":"Deployment smoke test. Keep it short."}' \
-            --output "$draft_file" "${api_url}/job-description-drafts"; then
-            echo "::error::Job description agent smoke test failed: $(cat "$draft_file" 2>/dev/null)"
+          # The API has internal ingress only, so it must not answer from the internet.
+          if curl --silent --max-time 15 --output /dev/null "${api_url}/health"; then
+            echo "::error::The API answered from the internet: ${api_url}"
             exit 1
           fi
-          python3 -c 'import json, sys; r = json.load(open(sys.argv[1])); print("Agent draft OK:", r["agentName"], "v" + str(r.get("agentVersion")), r["executionId"])' "$draft_file"
+          echo "API is not reachable from the internet"
 
           {
             echo "### Deployed ${GITHUB_SHA::7}"
             echo "| App | URL |"
             echo "| --- | --- |"
-            echo "| API | ${api_url} |"
-            echo "| Public portal | ${public_url} |"
-            echo "| Recruiter portal | ${recruiter_url} |"
+            echo "| Public portal (sign-in required) | ${public_url} |"
+            echo "| Recruiter portal (sign-in required) | ${recruiter_url} |"
+            echo "| API (internal only) | ${api_url} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show Container Apps diagnostics

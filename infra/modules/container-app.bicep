@@ -39,6 +39,15 @@ param minReplicas int = 1
 @description('Maximum replica count.')
 param maxReplicas int = 3
 
+@description('Expose the app to the internet. False keeps it reachable only from apps in the same Container Apps environment.')
+param external bool = true
+
+@description('Client ID of the Microsoft Entra app registration that users must sign in with. Empty leaves the app without authentication.')
+param authClientId string = ''
+
+@description('Paths that skip authentication, such as a health check that returns no data.')
+param authExcludedPaths array = []
+
 var probeTarget = empty(healthPath)
   ? { tcpSocket: { port: targetPort } }
   : { httpGet: { path: healthPath, port: targetPort } }
@@ -62,7 +71,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
       activeRevisionsMode: 'Single'
       secrets: secrets
       ingress: {
-        external: true
+        external: external
         targetPort: targetPort
         transport: 'auto'
         allowInsecure: false
@@ -104,6 +113,32 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
       scale: {
         minReplicas: minReplicas
         maxReplicas: maxReplicas
+      }
+    }
+  }
+}
+
+// Built-in authentication: every request must carry a Microsoft Entra session for an assigned user.
+// Without a client secret the platform uses the OpenID Connect ID token flow, so there is no secret to rotate.
+resource auth 'Microsoft.App/containerApps/authConfigs@2025-07-01' = if (!empty(authClientId)) {
+  parent: app
+  name: 'current'
+  properties: {
+    platform: {
+      enabled: true
+    }
+    globalValidation: {
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+      redirectToProvider: 'azureactivedirectory'
+      excludedPaths: authExcludedPaths
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: authClientId
+          openIdIssuer: '${environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
+        }
       }
     }
   }

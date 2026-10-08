@@ -3,9 +3,8 @@
 import { revalidatePath } from "next/cache";
 import type { AiAssessmentRating } from "@domain";
 import { ApiError, clearApplicationDecision, decideApplication, evaluateApplication, reviewApplication } from "@/data/jobs";
+import { currentUser } from "@/lib/user";
 
-/** Demo recruiter identity shown in the portal header; there is no sign-in yet. */
-const recruiter = "Jordan Lee";
 const ratings: AiAssessmentRating[] = ["Accurate", "Partially accurate", "Inaccurate"];
 
 export interface CandidateActionState {
@@ -54,7 +53,7 @@ export async function recordDecision(id: string, requiresRating: boolean, _: Can
     await decideApplication(id, {
       status,
       comment: String(formData.get("comment") ?? "").trim(),
-      decidedBy: recruiter,
+      decidedBy: (await currentUser()).name,
       aiRating: aiRating ?? null,
       agentFeedback: String(formData.get("agentFeedback") ?? "").trim(),
     });
