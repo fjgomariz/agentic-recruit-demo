@@ -78,7 +78,17 @@ Invoke-Graph PATCH "$graph/servicePrincipals/$servicePrincipalId" @{ appRoleAssi
 
 $principals = if ($AllowedUsers.Count) { $AllowedUsers | ForEach-Object { az ad user show --id $_ --query id --output tsv } } else { @(az ad signed-in-user show --query id --output tsv) }
 $assigned = (Invoke-Graph GET "$graph/servicePrincipals/$servicePrincipalId/appRoleAssignedTo").value.principalId
+$graphServicePrincipalId = az ad sp list --filter "appId eq '00000003-0000-0000-c000-000000000000'" --query '[0].id' --output tsv
+$grants = (Invoke-Graph GET "$graph/servicePrincipals/$servicePrincipalId/oauth2PermissionGrants").value
 foreach ($principalId in $principals) {
+  if ($grants | Where-Object { $_.principalId -eq $principalId -and $_.resourceId -eq $graphServicePrincipalId }) { } else {
+    # Consent on the user's behalf to the sign-in scopes; tenants that block user consent (for example for guests)
+    # would otherwise show "Need admin approval". The grant covers only this user and this app.
+    Write-Host "Granting sign-in consent for user $principalId"
+    Invoke-Graph POST "$graph/oauth2PermissionGrants" @{
+      clientId = $servicePrincipalId; consentType = 'Principal'; principalId = $principalId; resourceId = $graphServicePrincipalId; scope = 'openid profile email'
+    } | Out-Null
+  }
   if ($assigned -contains $principalId) { continue }
   Write-Host "Allowing user $principalId"
   Invoke-Graph POST "$graph/servicePrincipals/$servicePrincipalId/appRoleAssignedTo" @{
