@@ -185,3 +185,17 @@ def test_agent_definition_uses_production_maker_files_only() -> None:
 def test_experiment_deployment_is_confined_to_dev() -> None:
     bicep = (AGENTS.parent / "infra" / "main.bicep").read_text(encoding="utf-8")
     assert "environmentName == 'dev' ? experimentalModelDeployments : []" in bicep
+
+
+def test_dev_reuses_existing_foundry_account() -> None:
+    root = AGENTS.parent
+    main = (root / "infra" / "main.bicep").read_text(encoding="utf-8")
+    dev = (root / "infra" / "parameters" / "dev.bicepparam").read_text(encoding="utf-8")
+    workflow = (root / ".github" / "workflows" / "deploy-dev.yml").read_text(encoding="utf-8")
+    existing = (root / "infra" / "modules" / "foundry-existing.bicep").read_text(encoding="utf-8")
+
+    assert "param reuseExistingFoundry bool = false" in main
+    assert "if (reuseExistingFoundry)" in main
+    assert "param reuseExistingFoundry = true" in dev
+    assert "AZURE_FOUNDRY_ACCOUNT_EXISTS true" in workflow
+    assert "Microsoft.CognitiveServices/accounts@2026-07-01' existing" in existing

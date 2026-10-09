@@ -101,6 +101,9 @@ jobs:
           principal_id="$(az account get-access-token --query accessToken --output tsv \
             | python3 -c 'import base64, json, sys; p = sys.stdin.read().split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["oid"])')"
           azd env set AZURE_PRINCIPAL_ID "$principal_id"
+          # The dev Foundry account already exists. Deploy child resources without
+          # rewriting the account, which also isolates account-level policy failures.
+          azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS true
           azd provision --no-prompt
 
       - name: Set up Python

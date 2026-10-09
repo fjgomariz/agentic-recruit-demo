@@ -20,6 +20,9 @@
     "deploymentPrincipalId": {
       "value": "${AZURE_PRINCIPAL_ID=}"
     },
+    "reuseExistingFoundry": {
+      "value": "${AZURE_FOUNDRY_ACCOUNT_EXISTS=false}"
+    },
     "authClientId": {
       "value": "${AZURE_AUTH_CLIENT_ID=10bde4a5-4383-4e44-a349-4fd4259490fb}"
     }

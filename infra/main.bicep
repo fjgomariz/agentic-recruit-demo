@@ -32,6 +32,9 @@ param recruiterPortalImage string = ''
 @description('Object ID of the identity running the deployment. It receives Foundry User on the project so it can publish agent versions. Empty skips the assignment.')
 param deploymentPrincipalId string = ''
 
+@description('Reuse an existing Foundry account and project, deploying only child resources. Use this for established environments; leave false for a new environment.')
+param reuseExistingFoundry bool = false
+
 @description('Foundry model deployments. The first is the default for agents that do not choose a model. Deployment names must match the "modelDeployment" values in agents/*/agent.json.')
 param agentModelDeployments array = [
   {
@@ -101,6 +104,10 @@ var publicPortalAppName = 'ca-${workloadName}-public-${environmentName}'
 var recruiterPortalAppName = 'ca-${workloadName}-recruiter-${environmentName}'
 var foundryAccountName = take('aif-${workloadName}-${environmentName}-${uniqueToken}', 64)
 var foundryProjectName = 'proj-${workloadName}-${environmentName}'
+var foundryProjectEndpoint = 'https://${foundryAccountName}.services.ai.azure.com/api/projects/${foundryProjectName}'
+var activeModelDeployments = concat(agentModelDeployments, environmentName == 'dev' ? experimentalModelDeployments : [])
+var foundryModelDeploymentName = agentModelDeployments[0].name
+var foundryModelDeploymentNames = [for deployment in activeModelDeployments: deployment.name]
 
 // Built-in Foundry data-plane role.
 var foundryUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
@@ -241,7 +248,7 @@ module apiResumesAccess './modules/blob-container-access.bicep' = {
   }
 }
 
-module foundry './modules/foundry.bicep' = {
+module foundry './modules/foundry.bicep' = if (!reuseExistingFoundry) {
   scope: resourceGroup
   params: {
     accountName: foundryAccountName
@@ -249,7 +256,17 @@ module foundry './modules/foundry.bicep' = {
     location: location
     tags: tags
     applicationInsightsName: monitoring.outputs.applicationInsightsName
-    modelDeployments: concat(agentModelDeployments, environmentName == 'dev' ? experimentalModelDeployments : [])
+    modelDeployments: activeModelDeployments
+  }
+}
+
+module existingFoundry './modules/foundry-existing.bicep' = if (reuseExistingFoundry) {
+  scope: resourceGroup
+  params: {
+    accountName: foundryAccountName
+    projectName: foundryProjectName
+    applicationInsightsName: monitoring.outputs.applicationInsightsName
+    modelDeployments: activeModelDeployments
   }
 }
 
@@ -257,9 +274,13 @@ module foundry './modules/foundry.bicep' = {
 // narrower Foundry Project Runtime User role (responses/* only) does not allow.
 module apiFoundryAccess './modules/foundry-project-role.bicep' = {
   scope: resourceGroup
+  dependsOn: [
+    existingFoundry
+    foundry
+  ]
   params: {
-    accountName: foundry.outputs.accountName
-    projectName: foundry.outputs.projectName
+    accountName: foundryAccountName
+    projectName: foundryProjectName
     principalId: apiIdentity.outputs.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: foundryUserRoleId
@@ -269,9 +290,13 @@ module apiFoundryAccess './modules/foundry-project-role.bicep' = {
 // The deployment identity publishes agent versions after provisioning.
 module deployerFoundryAccess './modules/foundry-project-role.bicep' = if (!empty(deploymentPrincipalId)) {
   scope: resourceGroup
+  dependsOn: [
+    existingFoundry
+    foundry
+  ]
   params: {
-    accountName: foundry.outputs.accountName
-    projectName: foundry.outputs.projectName
+    accountName: foundryAccountName
+    projectName: foundryProjectName
     principalId: deploymentPrincipalId
     roleDefinitionId: foundryUserRoleId
   }
@@ -306,11 +331,11 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'AZURE_COSMOS_AGENT_EXECUTIONS_CONTAINER_NAME', value: cosmos.outputs.agentExecutionsContainerName }
       { name: 'AZURE_STORAGE_BLOB_ENDPOINT', value: storage.outputs.blobEndpoint }
       { name: 'AZURE_STORAGE_RESUMES_CONTAINER_NAME', value: storage.outputs.resumesContainerName }
-      { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundry.outputs.projectEndpoint }
+      { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundryProjectEndpoint }
       { name: 'JOB_DESCRIPTION_AGENT_NAME', value: jobDescriptionAgentName }
       { name: 'CANDIDATE_EVALUATION_AGENT_NAME', value: candidateEvaluationAgentName }
       { name: 'CANDIDATE_REVIEW_AGENT_NAME', value: candidateReviewAgentName }
-      { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundry.outputs.modelDeploymentName }
+      { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundryModelDeploymentName }
       { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
     ]
     secretEnv: {
@@ -378,14 +403,14 @@ output AZURE_COSMOS_PRIVATE_DNS_ZONE_NAME string = cosmosPrivateDns.outputs.priv
 output AZURE_BLOB_PRIVATE_ENDPOINT_ID string = blobPrivateEndpoint.outputs.privateEndpointId
 output AZURE_COSMOS_PRIVATE_ENDPOINT_ID string = cosmosPrivateEndpoint.outputs.privateEndpointId
 output AZURE_API_IDENTITY_CLIENT_ID string = apiIdentity.outputs.clientId
-output AZURE_AI_ACCOUNT_NAME string = foundry.outputs.accountName
-output AZURE_AI_PROJECT_NAME string = foundry.outputs.projectName
-output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
-output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundry.outputs.modelDeploymentName
+output AZURE_AI_ACCOUNT_NAME string = foundryAccountName
+output AZURE_AI_PROJECT_NAME string = foundryProjectName
+output AZURE_AI_PROJECT_ENDPOINT string = foundryProjectEndpoint
+output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundryModelDeploymentName
 output JOB_DESCRIPTION_AGENT_NAME string = jobDescriptionAgentName
 output CANDIDATE_EVALUATION_AGENT_NAME string = candidateEvaluationAgentName
 output CANDIDATE_REVIEW_AGENT_NAME string = candidateReviewAgentName
-output AZURE_AI_MODEL_DEPLOYMENT_NAMES array = foundry.outputs.modelDeploymentNames
+output AZURE_AI_MODEL_DEPLOYMENT_NAMES array = foundryModelDeploymentNames
 output API_URL string = deployApps ? api!.outputs.url : '' // Internal: reachable only from the portals.
 output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
 output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''
