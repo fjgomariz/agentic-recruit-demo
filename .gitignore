@@ -68,4 +68,3 @@ azure-storage-emulator/
 .cache/
 
 # Local evaluation outputs may contain synthetic agent assessments.
-agents/evaluations/results/

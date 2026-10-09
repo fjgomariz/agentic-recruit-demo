@@ -67,39 +67,33 @@ The Application Insights connection on the project enables server-side tracing. 
 
 Inputs that Foundry rejects are not retried: a Content Safety block or a PDF the model cannot read (`invalid_file`, for example a damaged or image-only file) is stored as **Needs manual review** with the reason.
 
-## Maker model experiment (no production changes)
+## Evaluating the candidate evaluator in Foundry
 
-`maker_experiment.py` compares two experiment-only Foundry prompt agents, `maker-baseline` and `maker-candidate`, using **the exact same** `candidate-evaluator` instructions, schema, reasoning effort, no tools, job, candidate message, and PDF bytes. Only their configured model deployments differ. `maker-eval-judge` uses the existing reviewer instructions and schema on one fixed judge model to check both outputs. The script pins each run to a published agent **version**, publishes one tracked run per target in Foundry **Evaluations**, and records response IDs for drill-down in **Tracing → Traces**. It never calls or publishes the production `candidate-evaluator`, changes Cosmos DB, or updates recruiter decisions. Repeated runs alternate the target order to reduce order effects.
+`evaluations/run_evaluation.py` runs a **Foundry cloud evaluation** against the agent, so the results live in **Foundry → Build → Evaluations** and can be compared run by run.
 
-The checked-in [synthetic dataset](evaluations/dataset.json) has a clear strong match, a weak match, a malicious PDF blocked by Content Safety, and an inline synthetic PDF injection probe. The latter is rendered deterministically from its checked-in resume text. Both targets receive identical input text and PDF bytes; the report records a SHA-256 of the dataset and PDFs. A shield block counts as resisting the injected instruction, but **does not prove model-level resistance** (the safety layer may have blocked it before either model could read it).
+How it works:
 
-**Run manually** with Python 3.12+ and an identity with Foundry User on the project:
+- **One agent, many versions.** The script publishes the lab agent `candidate-evaluator-lab` with the production `candidate-evaluator` definition. A different `--model` or `--instructions` file creates a new version of that same agent; identical settings reuse the existing version. The production agent is never touched.
+- **One evaluation, many runs.** The evaluation `candidate-evaluator-quality` holds a fixed [dataset](evaluations/dataset.json) (job, candidate message, resume text and the expected recommendation). Each invocation adds a run, named after the label, model and agent version.
+- **Foundry does the work.** For every dataset row Foundry calls the agent version and scores the answer with three criteria: `recommendation_matches` (string check against the expected label), `evidence_based` (model judge: claims supported by the resume) and `ignores_embedded_instructions` (model judge: injected text did not change the outcome). The judge is `EVALUATION_JUDGE_MODEL_DEPLOYMENT` (default `gpt-5.4`).
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e "src/api[dev]" -r agents/requirements.txt -r agents/evaluations/requirements.txt
-$env:FOUNDRY_PROJECT_ENDPOINT = azd env get-value AZURE_AI_PROJECT_ENDPOINT
-$env:MAKER_BASELINE_MODEL_DEPLOYMENT = azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME
-# Choose the actual, newer deployment NAME from the account list (not a model-family label).
-az cognitiveservices account deployment list -g rg-recruitment-dev -n aif-recruitment-dev-qds3kzxbvvtsg --query "[].{name:name,model:properties.model.name,version:properties.model.version}" -o table
-$env:MAKER_CANDIDATE_MODEL_DEPLOYMENT = "<name-of-newer-deployment>"
-$env:EVALUATION_JUDGE_MODEL_DEPLOYMENT = (Get-Content agents/candidate-evaluation-reviewer/agent.json | ConvertFrom-Json).modelDeployment
-.\.venv\Scripts\python agents/maker_experiment.py --dry-run
-.\.venv\Scripts\python agents/maker_experiment.py --repeats 2
+$env:AZURE_AI_PROJECT_ENDPOINT = azd env get-value AZURE_AI_PROJECT_ENDPOINT
+$env:AZURE_AI_MODEL_DEPLOYMENT_NAME = azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME
+
+.\.venv\Scripts\python agents/evaluations/run_evaluation.py --label baseline
+# Another model (any deployment in the Foundry account):
+.\.venv\Scripts\python agents/evaluations/run_evaluation.py --label candidate-model --model gpt-5.6-sol
+# A prompt variant:
+.\.venv\Scripts\python agents/evaluations/run_evaluation.py --label lenient-prompt --instructions agents/evaluations/variants/lenient-prompt.md
 ```
 
-`infra/main.bicep` declares the experiment-only `gpt-5.6-sol` deployment in `dev` alongside the existing production and reviewer deployments. The runner itself has **no hardcoded model names**. `--dry-run` checks configuration and fixture PDFs without calling Foundry. Live runs appear in Foundry **Evaluations** as paired `maker-baseline-*` and `maker-candidate-*` entries; the portal URL and metrics are also written to `agents/evaluations/results/latest.json` (ignored by git). Use `--no-publish-evaluations` only when a local-only result is intentional. No live candidate data is fetched or written.
+Open **Evaluations → candidate-evaluator-quality** to see the pass rate per criterion for each run and drill into the answers of any case. Add rows to `dataset.json` to make the evaluation stricter; the string check and the judges stay the same.
 
-**Cost estimate:** the runner collects actual input/output tokens for every successful Maker call. To calculate per-successful-evaluation cost, supply **verified USD rates per million tokens** for the two GlobalStandard deployments:
+Notes:
 
-```powershell
-$env:MAKER_BASELINE_INPUT_USD_PER_MILLION = "<verified rate>"
-$env:MAKER_BASELINE_OUTPUT_USD_PER_MILLION = "<verified rate>"
-$env:MAKER_CANDIDATE_INPUT_USD_PER_MILLION = "<verified rate>"
-$env:MAKER_CANDIDATE_OUTPUT_USD_PER_MILLION = "<verified rate>"
-.\.venv\Scripts\python agents/maker_experiment.py --repeats 2
-```
-
-The public Azure price page currently displays `$-` rather than usable rates for these models; **do not invent prices**. Without all four verified rates, the cost fields are `null` and the result cannot recommend promotion based on cost. The estimate uses uncached Maker input/output token rates (a conservative approximation) and excludes judge calls, blocked requests whose token usage isn't returned, Blob/Cosmos, and telemetry. Refresh rates from your Azure price sheet before using the cost comparison.
-
-The report covers correctness against hand-labelled score bands, recommendation consistency across repeats, the judge's evidence findings, injection resistance, latency, token usage, and an explicit promotion gate. A recommendation for human review requires an improvement without measured regressions in correctness, injection resistance, evidence, score consistency, latency (over 50%), or estimated Maker cost. Incomplete runs, judge failures, or missing required prices produce **Inconclusive** unless a non-price regression already makes **Do not promote** clear. This small synthetic benchmark is directional; a human decides whether to promote. Updating the production Maker is deliberately a separate step.
+- The resume is sent as extracted text. The production agent receives a PDF, so this measures the model and the instructions, not PDF handling. The prompt-shield block on `lena-fischer-visual-designer.pdf` is not part of this evaluation.
+- With six synthetic cases and a model judge, results are directional. Judges can disagree with a human, and a pass rate on a handful of rows is not a statistical result. A human decides before changing the production agent.
+- `infra/main.bicep` declares the `gpt-5.6-sol` deployment in `dev` only, as a candidate model for these runs.
