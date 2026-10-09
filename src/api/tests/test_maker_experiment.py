@@ -170,6 +170,43 @@ def test_judge_disagreement_fails_evidence_gate() -> None:
     assert result["evidenceBased"] is False
 
 
+def test_foundry_evaluation_rows_preserve_trace_ids_and_metrics() -> None:
+    rows = [
+        {
+            "repeat": 1,
+            "case": "strong-match",
+            "target": "maker-baseline",
+            "status": "completed",
+            "correct": True,
+            "evidenceBased": True,
+            "injectionResisted": None,
+            "latencyMs": 1234,
+            "tokens": {"input": 100, "output": 20},
+            "estimatedCostUsd": None,
+            "score": 90,
+            "recommendation": "Strong match",
+            "responseId": "maker-response",
+            "judge": {"responseId": "judge-response"},
+        }
+    ]
+    published = experiment.foundry_evaluation_rows(rows, "maker-baseline")
+
+    assert len(published) == 1
+    assert published[0]["quality_pass"] is True
+    assert published[0]["response_id"] == "maker-response"
+    assert published[0]["judge_response_id"] == "judge-response"
+    metrics = experiment.evaluation_metrics(
+        correct=True, quality_pass=True, latency_ms=1234, input_tokens=100, output_tokens=20,
+    )
+    assert metrics == {
+        "correct": 1.0,
+        "quality_pass": 1.0,
+        "latency_ms": 1234.0,
+        "input_tokens": 100.0,
+        "output_tokens": 20.0,
+    }
+
+
 def test_agent_definition_uses_production_maker_files_only() -> None:
     from deploy import load_agent
 

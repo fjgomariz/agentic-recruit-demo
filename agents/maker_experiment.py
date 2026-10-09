@@ -11,6 +11,7 @@ import json
 import os
 import statistics
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -367,6 +368,98 @@ def summarize(rows: list[dict[str, Any]], cases: list[Case], rate_cards: dict[st
     return {"targets": summary, "recommendation": verdict, "reason": reason, "limits": "Four synthetic cases and a model judge are directional, not a hiring validity study. Human review is required before any promotion."}
 
 
+def evaluation_metrics(
+    *,
+    correct: bool,
+    quality_pass: bool,
+    latency_ms: int,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    estimated_cost_usd: float | None = None,
+) -> dict[str, float]:
+    """Expose the experiment's deterministic metrics to the Foundry Evaluations UI."""
+    metrics = {
+        "correct": float(correct),
+        "quality_pass": float(quality_pass),
+        "latency_ms": float(latency_ms),
+    }
+    if input_tokens is not None:
+        metrics["input_tokens"] = float(input_tokens)
+    if output_tokens is not None:
+        metrics["output_tokens"] = float(output_tokens)
+    if estimated_cost_usd is not None:
+        metrics["estimated_cost_usd"] = float(estimated_cost_usd)
+    return metrics
+
+
+def foundry_evaluation_rows(rows: list[dict[str, Any]], target: str) -> list[dict[str, Any]]:
+    published = []
+    for row in rows:
+        if row["target"] != target:
+            continue
+        tokens = row.get("tokens") or {}
+        quality_pass = row.get("injectionResisted")
+        if quality_pass is None:
+            quality_pass = row.get("evidenceBased")
+        published.append({
+            "case": row["case"],
+            "repeat": row["repeat"],
+            "target": target,
+            "status": row["status"],
+            "correct": row.get("correct") is True,
+            "quality_pass": quality_pass is True,
+            "latency_ms": row["latencyMs"],
+            "input_tokens": tokens.get("input"),
+            "output_tokens": tokens.get("output"),
+            "estimated_cost_usd": row.get("estimatedCostUsd"),
+            "score": row.get("score"),
+            "recommendation": row.get("recommendation"),
+            "response_id": row.get("responseId"),
+            "judge_response_id": (row.get("judge") or {}).get("responseId"),
+            "details": json.dumps(row, separators=(",", ":"), default=str),
+        })
+    return published
+
+
+def publish_foundry_evaluations(report: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    """Track one Foundry evaluation per model target for a direct portal comparison."""
+    from azure.ai.evaluation import evaluate
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    tracked = {}
+    with tempfile.TemporaryDirectory(prefix="maker-evaluation-") as folder:
+        for target, model_key in zip(
+            TARGETS,
+            ("MAKER_BASELINE_MODEL_DEPLOYMENT", "MAKER_CANDIDATE_MODEL_DEPLOYMENT"),
+            strict=True,
+        ):
+            name = f"{target}-{report['experiment']}-{timestamp}"
+            data_path = Path(folder) / f"{target}.jsonl"
+            data_path.write_text(
+                "\n".join(json.dumps(row, default=str) for row in foundry_evaluation_rows(report["results"], target)) + "\n",
+                encoding="utf-8",
+            )
+            result = evaluate(
+                data=data_path,
+                evaluators={"maker_experiment": evaluation_metrics},
+                evaluation_name=name,
+                azure_ai_project=endpoint,
+                fail_on_evaluator_errors=True,
+                tags={
+                    "experiment": report["experiment"],
+                    "target": target,
+                    "modelDeployment": report["models"][model_key],
+                    "datasetSha256": report["datasetSha256"],
+                },
+            )
+            tracked[target] = {
+                "name": name,
+                "url": result.get("studio_url"),
+                "metrics": result.get("metrics"),
+            }
+    return tracked
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     config = configuration()
     rate_cards = prices()
@@ -393,13 +486,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         row = trial(openai, dataset.job, case, pdfs[case.id], target, versions[target], versions[JUDGE], rate_cards[target] if rate_cards else None)
                         rows.append({"repeat": repeat + 1, **row})
                         print(f"{target} {case.id} #{repeat + 1}: {row['status']} ({row['latencyMs']} ms)", flush=True)
-    return {
+    report = {
         "experiment": dataset.name, "runAt": datetime.now(UTC).isoformat(),
         "datasetSha256": dataset_hash, "models": config, "agentVersions": versions,
         "repeats": args.repeats, "pricingUsdPerMillionTokens": rate_cards,
         "costScope": "Maker input/output tokens only; excludes judge calls, storage and tracing. Rates supplied by operator.",
         "results": rows, "summary": summarize(rows, dataset.cases, rate_cards),
     }
+    if not args.no_publish_evaluations:
+        report["foundryEvaluations"] = publish_foundry_evaluations(report, config["FOUNDRY_PROJECT_ENDPOINT"])
+    return report
 
 
 def main() -> int:
@@ -408,6 +504,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--output", type=Path, default=ROOT / "agents" / "evaluations" / "results" / "latest.json")
     parser.add_argument("--dry-run", action="store_true", help="Validate configuration and the synthetic dataset without making Foundry calls")
+    parser.add_argument("--no-publish-evaluations", action="store_true", help="Keep results local instead of tracking them in Foundry Evaluations")
     args = parser.parse_args()
     report = run(args)
     print(json.dumps(report if args.dry_run else report["summary"], indent=2))
@@ -415,6 +512,8 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
         print(f"Report: {args.output}")
+        for target, tracked in report.get("foundryEvaluations", {}).items():
+            print(f"Foundry evaluation ({target}): {tracked['url'] or tracked['name']}")
     return 0
 
 

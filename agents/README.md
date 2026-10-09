@@ -69,7 +69,7 @@ Inputs that Foundry rejects are not retried: a Content Safety block or a PDF the
 
 ## Maker model experiment (no production changes)
 
-`maker_experiment.py` compares two experiment-only Foundry prompt agents, `maker-baseline` and `maker-candidate`, using **the exact same** `candidate-evaluator` instructions, schema, reasoning effort, no tools, job, candidate message, and PDF bytes. Only their configured model deployments differ. `maker-eval-judge` uses the existing reviewer instructions and schema on one fixed judge model to check both outputs. The script pins each run to a published agent **version**, records response IDs for the Foundry **Agents → Traces** view, and never calls or publishes the production `candidate-evaluator`, changes Cosmos DB, or updates recruiter decisions. Repeated runs alternate the target order to reduce order effects.
+`maker_experiment.py` compares two experiment-only Foundry prompt agents, `maker-baseline` and `maker-candidate`, using **the exact same** `candidate-evaluator` instructions, schema, reasoning effort, no tools, job, candidate message, and PDF bytes. Only their configured model deployments differ. `maker-eval-judge` uses the existing reviewer instructions and schema on one fixed judge model to check both outputs. The script pins each run to a published agent **version**, publishes one tracked run per target in Foundry **Evaluations**, and records response IDs for drill-down in **Tracing → Traces**. It never calls or publishes the production `candidate-evaluator`, changes Cosmos DB, or updates recruiter decisions. Repeated runs alternate the target order to reduce order effects.
 
 The checked-in [synthetic dataset](evaluations/dataset.json) has a clear strong match, a weak match, a malicious PDF blocked by Content Safety, and an inline synthetic PDF injection probe. The latter is rendered deterministically from its checked-in resume text. Both targets receive identical input text and PDF bytes; the report records a SHA-256 of the dataset and PDFs. A shield block counts as resisting the injected instruction, but **does not prove model-level resistance** (the safety layer may have blocked it before either model could read it).
 
@@ -77,7 +77,7 @@ The checked-in [synthetic dataset](evaluations/dataset.json) has a clear strong 
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -e "src/api[dev]" -r agents/requirements.txt
+.\.venv\Scripts\python -m pip install -e "src/api[dev]" -r agents/requirements.txt -r agents/evaluations/requirements.txt
 $env:FOUNDRY_PROJECT_ENDPOINT = azd env get-value AZURE_AI_PROJECT_ENDPOINT
 $env:MAKER_BASELINE_MODEL_DEPLOYMENT = azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME
 # Choose the actual, newer deployment NAME from the account list (not a model-family label).
@@ -88,7 +88,7 @@ $env:EVALUATION_JUDGE_MODEL_DEPLOYMENT = (Get-Content agents/candidate-evaluatio
 .\.venv\Scripts\python agents/maker_experiment.py --repeats 2
 ```
 
-`infra/main.bicep` declares the experiment-only `gpt-5.6-sol` deployment in `dev` alongside the existing production and reviewer deployments. The runner itself has **no hardcoded model names**. `--dry-run` checks configuration and fixture PDFs without calling Foundry. Results default to `agents/evaluations/results/latest.json` (ignored by git). No live candidate data is fetched or written.
+`infra/main.bicep` declares the experiment-only `gpt-5.6-sol` deployment in `dev` alongside the existing production and reviewer deployments. The runner itself has **no hardcoded model names**. `--dry-run` checks configuration and fixture PDFs without calling Foundry. Live runs appear in Foundry **Evaluations** as paired `maker-baseline-*` and `maker-candidate-*` entries; the portal URL and metrics are also written to `agents/evaluations/results/latest.json` (ignored by git). Use `--no-publish-evaluations` only when a local-only result is intentional. No live candidate data is fetched or written.
 
 **Cost estimate:** the runner collects actual input/output tokens for every successful Maker call. To calculate per-successful-evaluation cost, supply **verified USD rates per million tokens** for the two GlobalStandard deployments:
 
