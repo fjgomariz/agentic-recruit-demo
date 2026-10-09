@@ -50,6 +50,17 @@ param agentModelDeployments array = [
   }
 ]
 
+@description('Experiment-only model deployments. Created only in the dev environment and never used by the production candidate-evaluator.')
+param experimentalModelDeployments array = [
+  {
+    name: 'gpt-5.6-sol'
+    model: 'gpt-5.6-sol'
+    version: '2026-07-09'
+    skuName: 'GlobalStandard'
+    capacity: 10
+  }
+]
+
 @description('Name of the Foundry agent that drafts job descriptions.')
 param jobDescriptionAgentName string = 'job-description-writer'
 
@@ -238,7 +249,7 @@ module foundry './modules/foundry.bicep' = {
     location: location
     tags: tags
     applicationInsightsName: monitoring.outputs.applicationInsightsName
-    modelDeployments: agentModelDeployments
+    modelDeployments: concat(agentModelDeployments, environmentName == 'dev' ? experimentalModelDeployments : [])
   }
 }
 
