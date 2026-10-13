@@ -134,6 +134,8 @@ var foundryModelDeploymentNames = [for deployment in activeModelDeployments: dep
 var deployKnowledge = environmentName == 'dev'
 var searchServiceName = take('srch-${workloadName}-${environmentName}-${uniqueToken}', 60)
 var searchPrivateLinkRequestMessage = 'recruitment-search-${environmentName}'
+var knowledgeBaseName = 'recruiting-iq'
+var knowledgeBaseConnectionName = 'kb-recruiting-iq'
 var seedJobName = 'caj-${workloadName}-seed-${environmentName}'
 var deploySeedJob = deployKnowledge && deployApps && !empty(seedSourceBaseUrl)
 
@@ -398,6 +400,22 @@ module projectSearchAccess './modules/search-role.bicep' = if (deployKnowledge) 
     searchServiceName: search!.outputs.searchServiceName
     principalId: reuseExistingFoundry ? existingFoundry!.outputs.projectPrincipalId : foundry!.outputs.projectPrincipalId
     roleDefinitionId: searchIndexDataReaderRoleId
+  }
+}
+
+// The agent calls the knowledge base MCP endpoint through a project connection that signs in as the project identity.
+module knowledgeBaseConnection './modules/foundry-knowledge-connection.bicep' = if (deployKnowledge) {
+  scope: resourceGroup
+  dependsOn: [
+    existingFoundry
+    foundry
+    projectSearchAccess
+  ]
+  params: {
+    accountName: foundryAccountName
+    projectName: foundryProjectName
+    connectionName: knowledgeBaseConnectionName
+    mcpEndpoint: '${search!.outputs.searchEndpoint}/knowledgebases/${knowledgeBaseName}/mcp?api-version=2026-08-01-preview'
   }
 }
 

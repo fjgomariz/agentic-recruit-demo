@@ -123,6 +123,51 @@ def test_knowledge_sources_index_the_private_storage_with_identity_only() -> Non
     assert workflow.index("Seed the Foundry IQ knowledge sources") < workflow.index("Create the Foundry IQ knowledge base")
 
 
+def test_recruiter_copilot_uses_the_knowledge_base_tool_and_skips_without_search(monkeypatch) -> None:
+    import hashlib
+
+    from deploy import KnowledgeBaseNotConfigured, load_agent
+
+    folder = ROOT / "agents" / "recruiter-copilot"
+    monkeypatch.delenv("AZURE_SEARCH_ENDPOINT", raising=False)
+    with pytest.raises(KnowledgeBaseNotConfigured):
+        load_agent(folder, "model")
+
+    monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "https://search.example.net/")
+    name, _, definition, digest, _ = load_agent(folder, "model")
+    tool = definition.tools[0]
+    assert name == "recruiter-copilot" and definition.text is None
+    assert tool.server_url == "https://search.example.net/knowledgebases/recruiting-iq/mcp?api-version=2026-08-01-preview"
+    assert tool.project_connection_id == "kb-recruiting-iq" and tool.allowed_tools == ["knowledge_base_retrieve"]
+    assert tool.require_approval == "never"
+    # The agent must cite, ignore instructions inside documents and avoid protected characteristics.
+    text = definition.instructions
+    assert "Cite every claim" in text and "untrusted data" in text and "protected characteristics" in text
+
+    # Agents without a knowledge base keep their original hash, so no new versions are published for them.
+    folder = ROOT / "agents" / "candidate-evaluator"
+    _, _, existing, existing_digest, _ = load_agent(folder, "model")
+    config = json.loads((folder / "agent.json").read_text(encoding="utf-8"))
+    schema = json.loads((folder / config["outputSchemaFile"]).read_text(encoding="utf-8"))
+    legacy = json.dumps({"model": "model", "instructions": existing.instructions, "schema": schema,
+                         "effort": config["reasoningEffort"]}, sort_keys=True)
+    assert existing_digest == hashlib.sha256(legacy.encode()).hexdigest()
+    assert digest != existing_digest
+
+
+def test_knowledge_connection_is_deployed_for_dev_without_secrets() -> None:
+    infra = ROOT / "infra"
+    module = (infra / "modules" / "foundry-knowledge-connection.bicep").read_text(encoding="utf-8")
+    main = (infra / "main.bicep").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(encoding="utf-8")
+
+    assert "authType: 'ProjectManagedIdentity'" in module and "category: 'RemoteTool'" in module
+    assert "audience: 'https://search.azure.com/'" in module
+    assert "credentials" not in module
+    assert "knowledgeBaseConnection './modules/foundry-knowledge-connection.bicep' = if (deployKnowledge)" in main
+    assert 'AZURE_SEARCH_ENDPOINT="$(azd env get-value AZURE_SEARCH_ENDPOINT)"' in workflow
+
+
 def test_dev_reuses_existing_foundry_account() -> None:
     main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
     dev = (ROOT / "infra" / "parameters" / "dev.bicepparam").read_text(encoding="utf-8")

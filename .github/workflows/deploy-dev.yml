@@ -147,6 +147,7 @@ jobs:
           python -m pip install --quiet -r agents/requirements.txt
           AZURE_AI_PROJECT_ENDPOINT="$(azd env get-value AZURE_AI_PROJECT_ENDPOINT)" \
           AZURE_AI_MODEL_DEPLOYMENT_NAME="$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)" \
+          AZURE_SEARCH_ENDPOINT="$(azd env get-value AZURE_SEARCH_ENDPOINT)" \
             python agents/deploy.py
 
       - name: Create the Foundry IQ knowledge base

@@ -19,6 +19,7 @@ from typing import Any
 
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
+    MCPTool,
     PromptAgentDefinition,
     PromptAgentDefinitionTextOptions,
     Reasoning,
@@ -33,27 +34,54 @@ PERMISSION_RETRY_SECONDS = 15
 PERMISSION_RETRY_ATTEMPTS = 24
 
 
+class KnowledgeBaseNotConfigured(Exception):
+    """The agent needs a Foundry IQ knowledge base but the environment has no Azure AI Search endpoint."""
+
+
+def knowledge_base_tool(config: dict[str, Any]) -> MCPTool:
+    """Connect the agent to a Foundry IQ knowledge base through the project connection named in agent.json."""
+
+    endpoint = os.getenv("AZURE_SEARCH_ENDPOINT", "").rstrip("/")
+    if not endpoint:
+        raise KnowledgeBaseNotConfigured("AZURE_SEARCH_ENDPOINT is not set")
+    api_version = config.get("apiVersion", "2026-08-01-preview")
+    return MCPTool(
+        server_label="knowledge-base",
+        server_url=f"{endpoint}/knowledgebases/{config['name']}/mcp?api-version={api_version}",
+        require_approval="never",
+        allowed_tools=["knowledge_base_retrieve"],
+        project_connection_id=config["connection"],
+    )
+
+
 def load_agent(folder: Path, default_model: str) -> tuple[str, str, PromptAgentDefinition, str, str]:
-    """Build an agent definition and a stable hash of everything that defines its behavior."""
+    """Build an agent definition and a stable hash of everything that defines its behavior.
+
+    "outputSchemaFile" is optional (agents that answer in free text omit it) and "knowledgeBase"
+    ({"name", "connection"}) adds the Foundry IQ retrieval tool.
+    """
 
     config = json.loads((folder / "agent.json").read_text(encoding="utf-8"))
     model = config.get("modelDeployment") or default_model
     instructions = (folder / config["instructionsFile"]).read_text(encoding="utf-8").strip()
-    schema = json.loads((folder / config["outputSchemaFile"]).read_text(encoding="utf-8"))
+    schema = json.loads((folder / config["outputSchemaFile"]).read_text(encoding="utf-8")) if "outputSchemaFile" in config else None
     effort = config.get("reasoningEffort")
+    knowledge_base = knowledge_base_tool(config["knowledgeBase"]) if "knowledgeBase" in config else None
 
     definition = PromptAgentDefinition(
         model=model,
         instructions=instructions,
         text=PromptAgentDefinitionTextOptions(
             format=TextResponseFormatJsonSchema(name=config["outputSchemaName"], schema=schema, strict=True)
-        ),
+        ) if schema is not None else None,
+        tools=[knowledge_base] if knowledge_base else None,
         reasoning=Reasoning(effort=effort) if effort else None,
     )
-    fingerprint = json.dumps(
-        {"model": model, "instructions": instructions, "schema": schema, "effort": effort},
-        sort_keys=True,
-    )
+    fingerprint_data: dict[str, Any] = {"model": model, "instructions": instructions, "schema": schema, "effort": effort}
+    if knowledge_base:
+        # Only agents with a knowledge base carry this key, so the hashes of the other agents do not change.
+        fingerprint_data["knowledgeBase"] = {"url": knowledge_base.server_url, "connection": knowledge_base.project_connection_id}
+    fingerprint = json.dumps(fingerprint_data, sort_keys=True)
     return config["name"], config["description"], definition, hashlib.sha256(fingerprint.encode()).hexdigest(), model
 
 
@@ -103,6 +131,9 @@ def main() -> int:
             for attempt in range(1, PERMISSION_RETRY_ATTEMPTS + 1):
                 try:
                     publish(client, folder, model)
+                    break
+                except KnowledgeBaseNotConfigured as error:
+                    print(f"{folder.name}: skipped, no knowledge base here ({error})")
                     break
                 except Exception as error:
                     if not is_permission_error(error) or attempt == PERMISSION_RETRY_ATTEMPTS:

@@ -1,0 +1,10 @@
+{
+  "name": "recruiter-copilot",
+  "description": "Finds past candidates in the talent pool for a role and checks them against Northstar's hiring policies, citing every source.",
+  "instructionsFile": "instructions.md",
+  "reasoningEffort": "low",
+  "knowledgeBase": {
+    "name": "recruiting-iq",
+    "connection": "kb-recruiting-iq"
+  }
+}
