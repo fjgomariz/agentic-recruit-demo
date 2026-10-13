@@ -59,3 +59,5 @@ resource applicationInsightsConnection 'Microsoft.CognitiveServices/accounts/pro
     }
   }
 }
+
+output projectPrincipalId string = project.identity.principalId

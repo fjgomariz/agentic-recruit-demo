@@ -64,6 +64,17 @@ param experimentalModelDeployments array = [
   }
 ]
 
+@description('Embedding model for the Foundry IQ knowledge base. Created only in the dev environment.')
+param knowledgeModelDeployments array = [
+  {
+    name: 'text-embedding-3-large'
+    model: 'text-embedding-3-large'
+    version: '1'
+    skuName: 'GlobalStandard'
+    capacity: 50
+  }
+]
+
 @description('Name of the Foundry agent that drafts job descriptions.')
 param jobDescriptionAgentName string = 'job-description-writer'
 
@@ -105,9 +116,24 @@ var recruiterPortalAppName = 'ca-${workloadName}-recruiter-${environmentName}'
 var foundryAccountName = take('aif-${workloadName}-${environmentName}-${uniqueToken}', 64)
 var foundryProjectName = 'proj-${workloadName}-${environmentName}'
 var foundryProjectEndpoint = 'https://${foundryAccountName}.services.ai.azure.com/api/projects/${foundryProjectName}'
-var activeModelDeployments = concat(agentModelDeployments, environmentName == 'dev' ? experimentalModelDeployments : [])
+var activeModelDeployments = concat(
+  agentModelDeployments,
+  environmentName == 'dev' ? experimentalModelDeployments : [],
+  environmentName == 'dev' ? knowledgeModelDeployments : []
+)
 var foundryModelDeploymentName = agentModelDeployments[0].name
 var foundryModelDeploymentNames = [for deployment in activeModelDeployments: deployment.name]
+
+// Foundry IQ (Azure AI Search knowledge bases) is a dev-only demo capability.
+var deployKnowledge = environmentName == 'dev'
+var searchServiceName = take('srch-${workloadName}-${environmentName}-${uniqueToken}', 60)
+var searchPrivateLinkRequestMessage = 'recruitment-search-${environmentName}'
+
+// Built-in data-plane roles for Foundry IQ.
+var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+var searchIndexDataReaderRoleId = '1407120a-92aa-4202-b7e9-c0e197c71c8f'
+var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
+var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 
 // Built-in Foundry data-plane role.
 var foundryUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
@@ -302,6 +328,70 @@ module deployerFoundryAccess './modules/foundry-project-role.bicep' = if (!empty
   }
 }
 
+// Foundry IQ: Azure AI Search hosts the knowledge base that the recruiter-copilot agent queries over MCP.
+module search './modules/search.bicep' = if (deployKnowledge) {
+  scope: resourceGroup
+  params: {
+    searchServiceName: searchServiceName
+    location: location
+    tags: tags
+    storageAccountId: storage.outputs.storageAccountId
+    privateLinkRequestMessage: searchPrivateLinkRequestMessage
+  }
+}
+
+// The indexers read the knowledge source containers with the Search service identity.
+module searchStorageAccess './modules/storage-blob-reader.bicep' = if (deployKnowledge) {
+  scope: resourceGroup
+  params: {
+    storageAccountName: storage.outputs.storageAccountName
+    principalId: search!.outputs.principalId
+  }
+}
+
+// The knowledge base calls the embedding and planning models with the Search service identity.
+module searchFoundryAccess './modules/foundry-account-role.bicep' = if (deployKnowledge) {
+  scope: resourceGroup
+  dependsOn: [
+    existingFoundry
+    foundry
+  ]
+  params: {
+    accountName: foundryAccountName
+    principalId: search!.outputs.principalId
+    roleDefinitionId: cognitiveServicesUserRoleId
+  }
+}
+
+// The Foundry project identity calls the knowledge base MCP endpoint on behalf of the agent.
+module projectSearchAccess './modules/search-role.bicep' = if (deployKnowledge) {
+  scope: resourceGroup
+  params: {
+    searchServiceName: search!.outputs.searchServiceName
+    principalId: reuseExistingFoundry ? existingFoundry!.outputs.projectPrincipalId : foundry!.outputs.projectPrincipalId
+    roleDefinitionId: searchIndexDataReaderRoleId
+  }
+}
+
+// The deployment identity creates knowledge sources and the knowledge base after provisioning.
+module deployerSearchServiceAccess './modules/search-role.bicep' = if (deployKnowledge && !empty(deploymentPrincipalId)) {
+  scope: resourceGroup
+  params: {
+    searchServiceName: search!.outputs.searchServiceName
+    principalId: deploymentPrincipalId
+    roleDefinitionId: searchServiceContributorRoleId
+  }
+}
+
+module deployerSearchDataAccess './modules/search-role.bicep' = if (deployKnowledge && !empty(deploymentPrincipalId)) {
+  scope: resourceGroup
+  params: {
+    searchServiceName: search!.outputs.searchServiceName
+    principalId: deploymentPrincipalId
+    roleDefinitionId: searchIndexDataContributorRoleId
+  }
+}
+
 module api './modules/container-app.bicep' = if (deployApps) {
   scope: resourceGroup
   dependsOn: [
@@ -411,6 +501,12 @@ output JOB_DESCRIPTION_AGENT_NAME string = jobDescriptionAgentName
 output CANDIDATE_EVALUATION_AGENT_NAME string = candidateEvaluationAgentName
 output CANDIDATE_REVIEW_AGENT_NAME string = candidateReviewAgentName
 output AZURE_AI_MODEL_DEPLOYMENT_NAMES array = foundryModelDeploymentNames
+output AZURE_SEARCH_SERVICE_NAME string = deployKnowledge ? search!.outputs.searchServiceName : ''
+output AZURE_SEARCH_ENDPOINT string = deployKnowledge ? search!.outputs.searchEndpoint : ''
+output AZURE_SEARCH_PRIVATE_LINK_MESSAGE string = searchPrivateLinkRequestMessage
+output AZURE_STORAGE_TALENT_POOL_CONTAINER_NAME string = storage.outputs.talentPoolContainerName
+output AZURE_STORAGE_HIRING_POLICIES_CONTAINER_NAME string = storage.outputs.hiringPoliciesContainerName
+output AZURE_AI_EMBEDDING_DEPLOYMENT_NAME string = knowledgeModelDeployments[0].name
 output API_URL string = deployApps ? api!.outputs.url : '' // Internal: reachable only from the portals.
 output PUBLIC_PORTAL_URL string = deployApps ? publicPortal!.outputs.url : ''
 output RECRUITER_PORTAL_URL string = deployApps ? recruiterPortal!.outputs.url : ''

@@ -10,6 +10,12 @@ param tags object
 @description('Name of the private container that stores uploaded resumes.')
 param resumesContainerName string = 'resumes'
 
+@description('Name of the private container with the synthetic talent pool resumes that Foundry IQ indexes.')
+param talentPoolContainerName string = 'talent-pool'
+
+@description('Name of the private container with the hiring policy documents that Foundry IQ indexes.')
+param hiringPoliciesContainerName string = 'hiring-policies'
+
 // General-purpose storage for resumes and generated artifacts.
 resource storageAccount 'Microsoft.Storage/storageAccounts@2026-04-01' = {
   name: storageAccountName
@@ -58,8 +64,27 @@ resource resumesContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
   }
 }
 
+// Knowledge sources for Foundry IQ. Read through Entra ID only, by the Search service identity.
+resource talentPoolContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2026-04-01' = {
+  parent: blobService
+  name: talentPoolContainerName
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource hiringPoliciesContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2026-04-01' = {
+  parent: blobService
+  name: hiringPoliciesContainerName
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 output storageAccountName string = storageAccount.name
 output storageAccountId string = storageAccount.id
 output blobEndpoint string = storageAccount.properties.primaryEndpoints.blob
 output blobHostname string = '${storageAccount.name}.blob.${environment().suffixes.storage}'
 output resumesContainerName string = resumesContainer.name
+output talentPoolContainerName string = talentPoolContainer.name
+output hiringPoliciesContainerName string = hiringPoliciesContainer.name

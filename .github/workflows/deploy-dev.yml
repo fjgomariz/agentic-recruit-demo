@@ -106,6 +106,13 @@ jobs:
           azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS true
           azd provision --no-prompt
 
+      - name: Approve the Azure AI Search private link
+        run: |
+          set -euo pipefail
+          bash infra/scripts/approve-search-private-link.sh \
+            --storage-account-id "$(az storage account show --resource-group "rg-recruitment-${AZURE_ENV_NAME}" --name "$(azd env get-value AZURE_STORAGE_ACCOUNT_NAME)" --query id --output tsv)" \
+            --request-message "$(azd env get-value AZURE_SEARCH_PRIVATE_LINK_MESSAGE)"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

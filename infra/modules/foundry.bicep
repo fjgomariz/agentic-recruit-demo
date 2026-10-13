@@ -102,6 +102,7 @@ resource applicationInsightsConnection 'Microsoft.CognitiveServices/accounts/pro
 output accountName string = account.name
 output projectName string = project.name
 output projectId string = project.id
+output projectPrincipalId string = project.identity.principalId
 output projectEndpoint string = 'https://${account.properties.customSubDomainName}.services.ai.azure.com/api/projects/${project.name}'
 output modelDeploymentName string = modelDeployment[0].name
 output modelDeploymentNames array = [for (deployment, index) in modelDeployments: modelDeployment[index].name]

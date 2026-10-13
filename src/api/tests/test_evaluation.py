@@ -41,6 +41,28 @@ def test_experiment_deployment_is_confined_to_dev() -> None:
     assert "environmentName == 'dev' ? experimentalModelDeployments : []" in bicep
 
 
+def test_knowledge_search_is_entra_only_dev_only_and_reads_storage_privately() -> None:
+    infra = ROOT / "infra"
+    main = (infra / "main.bicep").read_text(encoding="utf-8")
+    search = (infra / "modules" / "search.bicep").read_text(encoding="utf-8")
+    script = (infra / "scripts" / "approve-search-private-link.sh").read_bytes()
+
+    assert "var deployKnowledge = environmentName == 'dev'" in main
+    assert "environmentName == 'dev' ? knowledgeModelDeployments : []" in main
+    assert "disableLocalAuth: true" in search
+    assert "publicNetworkAccess: 'enabled'" in search
+    assert "groupId: 'blob'" in search
+    assert b"\r" not in script
+    assert b"description=='${REQUEST_MESSAGE}'" in script
+
+
+def test_search_roles_are_scoped_to_the_services_that_need_them() -> None:
+    main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+    assert "roleDefinitionId: cognitiveServicesUserRoleId" in main
+    assert "roleDefinitionId: searchIndexDataReaderRoleId" in main
+    assert "storage-blob-reader.bicep" in main
+
+
 def test_dev_reuses_existing_foundry_account() -> None:
     main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
     dev = (ROOT / "infra" / "parameters" / "dev.bicepparam").read_text(encoding="utf-8")
