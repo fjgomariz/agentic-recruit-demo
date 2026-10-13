@@ -67,6 +67,9 @@ param experimentalModelDeployments array = [
 @description('Azure region for Azure AI Search. It can differ from the Foundry region: Search reaches the models over their Entra-protected endpoint. Pick a region that supports agentic retrieval and the semantic ranker, and has capacity for new services.')
 param searchLocation string = 'francecentral'
 
+@description('Public raw URL of the samples folder at a pinned commit. When set (dev only), a manual job copies the synthetic talent pool and policies into the knowledge source containers. The deployment pipeline sets it.')
+param seedSourceBaseUrl string = ''
+
 @description('Embedding model for the Foundry IQ knowledge base. Created only in the dev environment.')
 param knowledgeModelDeployments array = [
   {
@@ -131,6 +134,8 @@ var foundryModelDeploymentNames = [for deployment in activeModelDeployments: dep
 var deployKnowledge = environmentName == 'dev'
 var searchServiceName = take('srch-${workloadName}-${environmentName}-${uniqueToken}', 60)
 var searchPrivateLinkRequestMessage = 'recruitment-search-${environmentName}'
+var seedJobName = 'caj-${workloadName}-seed-${environmentName}'
+var deploySeedJob = deployKnowledge && deployApps && !empty(seedSourceBaseUrl)
 
 // Built-in data-plane roles for Foundry IQ.
 var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
@@ -273,6 +278,26 @@ module apiResumesAccess './modules/blob-container-access.bicep' = {
   params: {
     storageAccountName: storage.outputs.storageAccountName
     containerName: storage.outputs.resumesContainerName
+    principalId: apiIdentity.outputs.principalId
+  }
+}
+
+// Seeding the knowledge sources runs inside the virtual network (the storage account is private only), so the
+// API identity gets write access to the two knowledge source containers and nothing else.
+module apiTalentPoolAccess './modules/blob-container-access.bicep' = if (deploySeedJob) {
+  scope: resourceGroup
+  params: {
+    storageAccountName: storage.outputs.storageAccountName
+    containerName: storage.outputs.talentPoolContainerName
+    principalId: apiIdentity.outputs.principalId
+  }
+}
+
+module apiHiringPoliciesAccess './modules/blob-container-access.bicep' = if (deploySeedJob) {
+  scope: resourceGroup
+  params: {
+    storageAccountName: storage.outputs.storageAccountName
+    containerName: storage.outputs.hiringPoliciesContainerName
     principalId: apiIdentity.outputs.principalId
   }
 }
@@ -437,6 +462,28 @@ module api './modules/container-app.bicep' = if (deployApps) {
   }
 }
 
+// One-off, manual job that copies the synthetic talent pool and hiring policies into the private containers.
+// The deployment pipeline starts it after provisioning (see .github/workflows/deploy-dev.yml).
+module seedJob './modules/seed-job.bicep' = if (deploySeedJob) {
+  scope: resourceGroup
+  dependsOn: [
+    apiTalentPoolAccess
+    apiHiringPoliciesAccess
+    blobPrivateEndpoint
+  ]
+  params: {
+    name: seedJobName
+    location: location
+    tags: tags
+    environmentId: containerApps.outputs.environmentId
+    image: apiImage
+    userAssignedIdentityId: apiIdentity.outputs.id
+    userAssignedIdentityClientId: apiIdentity.outputs.clientId
+    blobEndpoint: storage.outputs.blobEndpoint
+    sourceBaseUrl: seedSourceBaseUrl
+  }
+}
+
 module publicPortal './modules/container-app.bicep' = if (deployApps) {
   scope: resourceGroup
   params: {
@@ -507,6 +554,7 @@ output AZURE_AI_MODEL_DEPLOYMENT_NAMES array = foundryModelDeploymentNames
 output AZURE_SEARCH_SERVICE_NAME string = deployKnowledge ? search!.outputs.searchServiceName : ''
 output AZURE_SEARCH_ENDPOINT string = deployKnowledge ? search!.outputs.searchEndpoint : ''
 output AZURE_SEARCH_PRIVATE_LINK_MESSAGE string = searchPrivateLinkRequestMessage
+output AZURE_SEED_JOB_NAME string = deploySeedJob ? seedJob!.outputs.name : ''
 output AZURE_STORAGE_TALENT_POOL_CONTAINER_NAME string = storage.outputs.talentPoolContainerName
 output AZURE_STORAGE_HIRING_POLICIES_CONTAINER_NAME string = storage.outputs.hiringPoliciesContainerName
 output AZURE_AI_EMBEDDING_DEPLOYMENT_NAME string = knowledgeModelDeployments[0].name

@@ -1,7 +1,11 @@
 """Offline guardrails for the Foundry candidate-evaluator evaluation and the dev infrastructure it relies on."""
 
+import importlib.util
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "agents" / "evaluations"))
@@ -64,6 +68,39 @@ def test_search_roles_are_scoped_to_the_services_that_need_them() -> None:
     assert "roleDefinitionId: searchIndexDataReaderRoleId" in main
     assert "storage-blob-reader.bicep" in main
 
+
+def _load_seed_script():
+    spec = importlib.util.spec_from_file_location("seed_knowledge", ROOT / "infra" / "scripts" / "seed-knowledge.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_seed_manifest_lists_existing_files_and_rejects_unsafe_names() -> None:
+    seed = _load_seed_script()
+    manifest = json.loads((ROOT / "samples" / "seed-manifest.json").read_text(encoding="utf-8"))
+
+    assert set(seed.validate_manifest(manifest)) == {"talent-pool", "hiring-policies"}
+    for container, files in manifest.items():
+        for name in files:
+            assert (ROOT / "samples" / container / name).is_file()
+    for bad in ({"talent-pool": ["../secrets.pdf"]}, {"talent-pool": ["a/b.pdf"]}, {"../x": ["a.pdf"]}, {}, {"talent-pool": []}):
+        with pytest.raises(ValueError):
+            seed.validate_manifest(bad)
+
+
+def test_seed_job_copies_from_a_pinned_public_source_with_managed_identity() -> None:
+    script = (ROOT / "infra" / "scripts" / "seed-knowledge.py").read_text(encoding="utf-8")
+    bicep = (ROOT / "infra" / "modules" / "seed-job.bicep").read_text(encoding="utf-8")
+    main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(encoding="utf-8")
+
+    assert 'ALLOWED_HOST_PREFIX = "https://raw.githubusercontent.com/"' in script
+    assert "ManagedIdentityCredential" in script and "overwrite=True" in script
+    assert "loadTextContent('../scripts/seed-knowledge.py')" in bicep
+    assert "triggerType: 'Manual'" in bicep
+    assert "var deploySeedJob = deployKnowledge && deployApps && !empty(seedSourceBaseUrl)" in main
+    assert "${GITHUB_REPOSITORY}/${GITHUB_SHA}/samples" in workflow
 
 def test_dev_reuses_existing_foundry_account() -> None:
     main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")

@@ -104,6 +104,8 @@ jobs:
           # The dev Foundry account already exists. Deploy child resources without
           # rewriting the account, which also isolates account-level policy failures.
           azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS true
+          # The synthetic knowledge source data is copied from this exact commit by a job inside the virtual network.
+          azd env set SEED_SOURCE_BASE_URL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/samples"
           azd provision --no-prompt
 
       - name: Approve the Azure AI Search private link
@@ -112,6 +114,25 @@ jobs:
           bash infra/scripts/approve-search-private-link.sh \
             --storage-account-id "$(az storage account show --resource-group "rg-recruitment-${AZURE_ENV_NAME}" --name "$(azd env get-value AZURE_STORAGE_ACCOUNT_NAME)" --query id --output tsv)" \
             --request-message "$(azd env get-value AZURE_SEARCH_PRIVATE_LINK_MESSAGE)"
+
+      - name: Seed the Foundry IQ knowledge sources
+        run: |
+          set -euo pipefail
+          job="$(azd env get-value AZURE_SEED_JOB_NAME)"
+          resource_group="rg-recruitment-${AZURE_ENV_NAME}"
+          execution="$(az containerapp job start --resource-group "$resource_group" --name "$job" --query name --output tsv)"
+          echo "Started ${job}/${execution}"
+          for attempt in $(seq 1 60); do
+            status="$(az containerapp job execution show --resource-group "$resource_group" --name "$job" --job-execution-name "$execution" --query properties.status --output tsv)"
+            echo "Seed job status: ${status}"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) echo "::error::The seed job ended with status ${status}"; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::The seed job did not finish in 15 minutes"
+          exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5

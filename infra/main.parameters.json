@@ -23,6 +23,9 @@
     "reuseExistingFoundry": {
       "value": "${AZURE_FOUNDRY_ACCOUNT_EXISTS=false}"
     },
+    "seedSourceBaseUrl": {
+      "value": "${SEED_SOURCE_BASE_URL=}"
+    },
     "authClientId": {
       "value": "${AZURE_AUTH_CLIENT_ID=10bde4a5-4383-4e44-a349-4fd4259490fb}"
     }

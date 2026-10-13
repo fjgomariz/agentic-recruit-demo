@@ -1,0 +1,41 @@
+{
+  "talent-pool": [
+    "aisha-khan-interaction-designer.pdf",
+    "alex-novak-backend-engineer.pdf",
+    "ben-ashworth-accessibility-specialist.pdf",
+    "chen-wei-senior-frontend-engineer.pdf",
+    "clara-jensen-art-director.pdf",
+    "daniel-okafor-ui-designer.pdf",
+    "david-mensah-technical-program-manager.pdf",
+    "elena-petrova-design-systems-lead.pdf",
+    "grace-adeyemi-data-scientist.pdf",
+    "hannah-cole-head-of-design.pdf",
+    "isabelle-moreau-marketing-manager.pdf",
+    "jonas-weber-senior-ux-designer-de.pdf",
+    "julia-hoffmann-customer-success.pdf",
+    "liam-oconnor-devops-engineer.pdf",
+    "lucia-ferrari-brand-motion-designer.pdf",
+    "marcus-lindqvist-service-designer.pdf",
+    "mateo-silva-ml-engineer-rag.pdf",
+    "nadia-haddad-ux-research-lead.pdf",
+    "nina-bergstrom-finance-analyst.pdf",
+    "oliver-grant-ux-writer.pdf",
+    "omar-farouk-account-executive.pdf",
+    "peter-kowalski-recruiter.pdf",
+    "priya-nair-product-designer.pdf",
+    "ravi-patel-junior-ux-researcher.pdf",
+    "rosa-delgado-design-engineer.pdf",
+    "sara-lindgren-product-manager.pdf",
+    "sofia-marin-disenadora-producto-es.pdf",
+    "tomas-ribeiro-product-designer.pdf",
+    "yuki-tanaka-ai-product-designer.pdf"
+  ],
+  "hiring-policies": [
+    "compensation-bands.md",
+    "data-retention-and-consent.md",
+    "inclusive-language-style-guide.md",
+    "interview-process.md",
+    "language-requirements.md",
+    "remote-and-hybrid-policy.md"
+  ]
+}
