@@ -64,6 +64,9 @@ param experimentalModelDeployments array = [
   }
 ]
 
+@description('Azure region for Azure AI Search. It can differ from the Foundry region: Search reaches the models over their Entra-protected endpoint. Pick a region that supports agentic retrieval and the semantic ranker, and has capacity for new services.')
+param searchLocation string = 'francecentral'
+
 @description('Embedding model for the Foundry IQ knowledge base. Created only in the dev environment.')
 param knowledgeModelDeployments array = [
   {
@@ -333,7 +336,7 @@ module search './modules/search.bicep' = if (deployKnowledge) {
   scope: resourceGroup
   params: {
     searchServiceName: searchServiceName
-    location: location
+    location: searchLocation
     tags: tags
     storageAccountId: storage.outputs.storageAccountId
     privateLinkRequestMessage: searchPrivateLinkRequestMessage

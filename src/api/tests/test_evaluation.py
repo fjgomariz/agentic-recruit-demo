@@ -48,6 +48,8 @@ def test_knowledge_search_is_entra_only_dev_only_and_reads_storage_privately() -
     script = (infra / "scripts" / "approve-search-private-link.sh").read_bytes()
 
     assert "var deployKnowledge = environmentName == 'dev'" in main
+    assert "param searchLocation string" in main
+    assert "location: searchLocation" in main
     assert "environmentName == 'dev' ? knowledgeModelDeployments : []" in main
     assert "disableLocalAuth: true" in search
     assert "publicNetworkAccess: 'enabled'" in search
