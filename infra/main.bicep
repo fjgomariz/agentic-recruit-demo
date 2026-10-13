@@ -527,6 +527,7 @@ output AZURE_PRIVATE_ENDPOINTS_SUBNET_ID string = network.outputs.privateEndpoin
 output AZURE_LOG_ANALYTICS_WORKSPACE_NAME string = monitoring.outputs.logAnalyticsWorkspaceName
 output AZURE_APPLICATION_INSIGHTS_NAME string = monitoring.outputs.applicationInsightsName
 output AZURE_STORAGE_ACCOUNT_NAME string = storage.outputs.storageAccountName
+output AZURE_STORAGE_ACCOUNT_ID string = storage.outputs.storageAccountId
 output AZURE_STORAGE_BLOB_ENDPOINT string = storage.outputs.blobEndpoint
 output AZURE_STORAGE_BLOB_HOSTNAME string = storage.outputs.blobHostname
 output AZURE_COSMOS_ACCOUNT_NAME string = cosmos.outputs.accountName

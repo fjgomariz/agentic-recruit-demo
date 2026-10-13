@@ -102,6 +102,27 @@ def test_seed_job_copies_from_a_pinned_public_source_with_managed_identity() -> 
     assert "var deploySeedJob = deployKnowledge && deployApps && !empty(seedSourceBaseUrl)" in main
     assert "${GITHUB_REPOSITORY}/${GITHUB_SHA}/samples" in workflow
 
+def test_knowledge_sources_index_the_private_storage_with_identity_only() -> None:
+    spec = importlib.util.spec_from_file_location("setup_knowledge", ROOT / "agents" / "knowledge" / "setup_knowledge.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    config = {"storage_id": "/subscriptions/s/resourceGroups/r/providers/Microsoft.Storage/storageAccounts/a",
+              "openai_endpoint": "https://acct.openai.azure.com", "embedding": "emb", "planner": "plan"}
+
+    source = module.blob_source("ks", "description", "talent-pool", config)
+    parameters = source["azureBlobParameters"]
+    assert parameters["connectionString"].startswith("ResourceId=")
+    assert "AccountKey" not in parameters["connectionString"] and "SharedAccessSignature" not in parameters["connectionString"]
+    assert parameters["ingestionParameters"]["networkAccessMode"] == "private"
+    assert parameters["ingestionParameters"]["embeddingModel"]["azureOpenAIParameters"]["deploymentId"] == "emb"
+    assert {"talent-pool-ks", "hiring-policies-ks"} == {module.TALENT_POOL_SOURCE, module.POLICIES_SOURCE}
+    assert "talent pool" in module.RETRIEVAL_INSTRUCTIONS and "hiring policies" in module.RETRIEVAL_INSTRUCTIONS
+
+    workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(encoding="utf-8")
+    assert "python agents/knowledge/setup_knowledge.py" in workflow
+    assert workflow.index("Seed the Foundry IQ knowledge sources") < workflow.index("Create the Foundry IQ knowledge base")
+
+
 def test_dev_reuses_existing_foundry_account() -> None:
     main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
     dev = (ROOT / "infra" / "parameters" / "dev.bicepparam").read_text(encoding="utf-8")

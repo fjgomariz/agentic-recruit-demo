@@ -149,6 +149,16 @@ jobs:
           AZURE_AI_MODEL_DEPLOYMENT_NAME="$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)" \
             python agents/deploy.py
 
+      - name: Create the Foundry IQ knowledge base
+        run: |
+          set -euo pipefail
+          AZURE_SEARCH_ENDPOINT="$(azd env get-value AZURE_SEARCH_ENDPOINT)" \
+          AZURE_STORAGE_ACCOUNT_ID="$(azd env get-value AZURE_STORAGE_ACCOUNT_ID)" \
+          AZURE_AI_ACCOUNT_NAME="$(azd env get-value AZURE_AI_ACCOUNT_NAME)" \
+          AZURE_AI_EMBEDDING_DEPLOYMENT_NAME="$(azd env get-value AZURE_AI_EMBEDDING_DEPLOYMENT_NAME)" \
+          AZURE_AI_MODEL_DEPLOYMENT_NAME="$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)" \
+            python agents/knowledge/setup_knowledge.py
+
       - name: Smoke test endpoints
         run: |
           set -euo pipefail
