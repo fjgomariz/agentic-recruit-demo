@@ -169,6 +169,7 @@ class TalentMatchResult(DomainModel):
 
     answer: str
     sources: list[TalentMatchSource]
+    citations_adjusted: int = 0
     agent_queries: list[str]
     retrieval_plan: RetrievalPlan | None = None
     execution_id: str

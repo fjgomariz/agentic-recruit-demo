@@ -206,6 +206,8 @@ export interface RetrievalPlan {
 export interface TalentMatchResult {
   answer: string;
   sources: TalentMatchSource[];
+  /** Citations the API corrected or removed because the model had pointed at a different document than the text names. */
+  citationsAdjusted: number;
   agentQueries: string[];
   retrievalPlan?: RetrievalPlan | null;
   executionId: string;

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -26,9 +27,16 @@ logger = logging.getLogger(__name__)
 KNOWLEDGE_API_VERSION = "2026-08-01-preview"
 SAFE_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 CITATION_MARKER = re.compile(r"【[^】]*】")
-REPEATED_MARKER = re.compile(r"(\[(\d+)\])(?:\[\2\])+")
+TERM = re.compile(r"[a-z0-9]+(?:[,.][0-9]+)*")
 MAX_TITLE_LENGTH = 60
 PLAN_TIMEOUT_SECONDS = 45
+MIN_SHARED_TERMS = 2
+# Words that appear in nearly every document and say nothing about which policy a sentence comes from.
+GENERIC_TERMS = frozenset(
+    "about also been candidate candidates each every from have into level levels like more most only other over policy "
+    "required requires requirement requirements role roles should some such than that their them then there these they "
+    "this those used what when where which will with would your".split()
+)
 
 TokenProvider = Callable[[], Awaitable[str]]
 
@@ -79,21 +87,53 @@ def _humanize(file_name: str) -> str:
     return stem[:1].upper() + stem[1:]
 
 
-def _title(kind: KnowledgeSourceKind, file_name: str, snippet: str | None) -> str:
-    """Name a resume after the person on its first line; policies are named after their file."""
+def _person(snippet: str | None) -> str | None:
+    """The candidate's name: the first line of a resume, when it looks like a name."""
 
-    if kind is KnowledgeSourceKind.TALENT_POOL and snippet:
-        first = next((line.strip() for line in snippet.splitlines() if line.strip()), "")
-        if first and len(first) <= MAX_TITLE_LENGTH and not any(mark in first for mark in "|@:"):
-            return first
-    return _humanize(file_name)
+    first = next((line.strip() for line in (snippet or "").splitlines() if line.strip()), "")
+    if first and len(first) <= MAX_TITLE_LENGTH and not any(mark in first for mark in "|@:"):
+        return first
+    return None
 
 
-def _retrieved_documents(output_items: list[dict[str, Any]]) -> tuple[list[str], dict[str, str]]:
-    """Read the agent's knowledge base queries and the first line of every retrieved document."""
+def _terms(text: str) -> set[str]:
+    """Distinctive lowercase terms, with plurals folded, used to tell which policy a sentence is about."""
+
+    terms = set()
+    for word in TERM.findall(text.lower()):
+        if any(character.isdigit() for character in word):
+            terms.add(word)
+        elif len(word) >= 4 and word not in GENERIC_TERMS:
+            terms.add(word[:-1] if word.endswith("s") and not word.endswith("ss") else word)
+    return terms
+
+
+def _mentions(line: str, name: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", line, re.IGNORECASE) is not None
+
+
+@dataclass(frozen=True)
+class RetrievedDocument:
+    """A document the agent's knowledge base call returned, with enough content to check citations against."""
+
+    url: str
+    kind: KnowledgeSourceKind
+    file_name: str
+    snippet: str
+    person: str | None
+
+    @property
+    def title(self) -> str:
+        if self.kind is KnowledgeSourceKind.TALENT_POOL and self.person:
+            return self.person
+        return _humanize(self.file_name)
+
+
+def _retrieved(output_items: list[dict[str, Any]]) -> tuple[list[str], dict[str, RetrievedDocument]]:
+    """Read the queries the agent sent and the documents the knowledge base returned."""
 
     queries: list[str] = []
-    snippets: dict[str, str] = {}
+    documents: dict[str, RetrievedDocument] = {}
     for item in output_items:
         if item.get("type") != "mcp_call":
             continue
@@ -105,37 +145,76 @@ def _retrieved_documents(output_items: list[dict[str, Any]]) -> tuple[list[str],
             if isinstance(query, str) and query not in queries:
                 queries.append(query)
         try:
-            documents = json.loads(item.get("output") or "{}").get("documents") or []
+            returned = json.loads(item.get("output") or "{}").get("documents") or []
         except (TypeError, json.JSONDecodeError, AttributeError):
-            documents = []
-        for document in documents:
+            returned = []
+        for document in returned:
             try:
                 content = json.loads(document.get("content") or "{}")
             except (TypeError, json.JSONDecodeError):
                 content = {}
-            url = content.get("blob_url") or document.get("url") or document.get("title")
-            if isinstance(url, str) and isinstance(content.get("snippet"), str):
-                snippets.setdefault(url, content["snippet"])
-    return queries, snippets
+            url = content.get("blob_url") or document.get("url")
+            located = _location(url) if isinstance(url, str) else None
+            if located is None or url in documents:
+                continue
+            snippet = content.get("snippet") if isinstance(content.get("snippet"), str) else ""
+            documents[url] = RetrievedDocument(url, located[0], located[1], snippet, _person(snippet) if located[0] is KnowledgeSourceKind.TALENT_POOL else None)
+    return queries, documents
 
 
-def parse_answer(response: Any) -> tuple[str, list[TalentMatchSource], list[str]]:
-    """Turn the agent's message into text with [n] markers, the numbered sources and the queries it ran."""
+@dataclass(frozen=True)
+class ParsedAnswer:
+    text: str
+    sources: list[TalentMatchSource]
+    queries: list[str]
+    citations_adjusted: int
+
+
+def _verified_citations(line: str, cited: list[str], documents: dict[str, RetrievedDocument]) -> tuple[list[str], int]:
+    """Keep only the citations the line itself supports, and add the resume of every candidate it names.
+
+    The model numbers documents unreliably in long answers, so a citation is trusted only when the text agrees:
+    a resume must belong to a candidate named in the line, and a policy must share distinctive terms with the line.
+    """
+
+    named = [document for document in documents.values() if document.person and _mentions(line, document.person)]
+    line_terms = _terms(line)
+    keep: list[str] = []
+    adjusted = 0
+    for url in cited:
+        document = documents.get(url)
+        if document is None:
+            supported = False
+        elif document.kind is KnowledgeSourceKind.TALENT_POOL:
+            supported = document in named
+        else:
+            supported = len(line_terms & _terms(document.snippet)) >= MIN_SHARED_TERMS
+        if supported and url not in keep:
+            keep.append(url)
+        elif not supported:
+            adjusted += 1
+    for document in named:
+        if document.url not in keep:
+            keep.append(document.url)
+            adjusted += 1
+    return keep, adjusted
+
+
+def parse_answer(response: Any) -> ParsedAnswer:
+    """Turn the agent's message into text with verified [n] markers, the numbered sources and the queries it ran."""
 
     items = [_as_dict(item) for item in (getattr(response, "output", None) or [])]
-    queries, snippets = _retrieved_documents(items)
+    queries, documents = _retrieved(items)
 
     sources: list[TalentMatchSource] = []
     numbers: dict[str, int] = {}
+    adjusted = 0
 
-    def number_for(url: str) -> int | None:
-        located = _location(url)
-        if located is None:
-            return None
+    def number_for(url: str) -> int:
         if url not in numbers:
-            kind, file_name = located
+            document = documents[url]
             numbers[url] = len(sources) + 1
-            sources.append(TalentMatchSource(id=numbers[url], container=kind, file_name=file_name, title=_title(kind, file_name, snippets.get(url))))
+            sources.append(TalentMatchSource(id=numbers[url], container=document.kind, file_name=document.file_name, title=document.title))
         return numbers[url]
 
     paragraphs: list[str] = []
@@ -147,21 +226,26 @@ def parse_answer(response: Any) -> tuple[str, list[TalentMatchSource], list[str]
             text = part.get("text")
             if not isinstance(text, str):
                 continue
-            annotations = sorted(
-                (_as_dict(a) for a in part.get("annotations") or [] if _as_dict(a).get("type") == "url_citation"),
-                key=lambda annotation: annotation.get("start_index", 0),
-            )
-            # Number sources in reading order, then replace from the end so earlier indices stay valid.
-            numbered = [(annotation, number_for(annotation.get("url") or "")) for annotation in annotations]
-            for annotation, number in reversed(numbered):
+            spans = []
+            for annotation in (_as_dict(a) for a in part.get("annotations") or []):
                 start, end = annotation.get("start_index"), annotation.get("end_index")
-                if not isinstance(start, int) or not isinstance(end, int) or not CITATION_MARKER.fullmatch(text[start:end]):
-                    continue
-                text = f"{text[:start]}{f'[{number}]' if number else ''}{text[end:]}"
-            paragraphs.append(CITATION_MARKER.sub("", text))
+                if annotation.get("type") == "url_citation" and isinstance(start, int) and isinstance(end, int) and CITATION_MARKER.fullmatch(text[start:end]):
+                    spans.append((start, annotation.get("url") or ""))
 
-    answer = REPEATED_MARKER.sub(r"\1", "\n\n".join(paragraphs)).strip()
-    return answer, sources, queries
+            lines, offset = [], 0
+            for raw in text.split("\n"):
+                cited = [url for start, url in spans if offset <= start < offset + len(raw)]
+                offset += len(raw) + 1
+                clean = CITATION_MARKER.sub("", raw).rstrip()
+                if not clean.strip():
+                    lines.append(clean)
+                    continue
+                keep, changed = _verified_citations(clean, cited, documents)
+                adjusted += changed
+                lines.append(clean + "".join(f"[{number}]" for number in dict.fromkeys(number_for(url) for url in keep)))
+            paragraphs.append("\n".join(lines))
+
+    return ParsedAnswer("\n\n".join(paragraphs).strip(), sources, queries, adjusted)
 
 
 class KnowledgeBaseClient:
@@ -230,21 +314,24 @@ class TalentPoolAgentService:
         question = build_talent_match_input(job, notes)
         response, run = await self._agent.run(question, related_entity_ids=related)
 
-        answer, sources, queries = parse_answer(response)
-        if not answer:
+        parsed = parse_answer(response)
+        if not parsed.text:
             logger.error("Recruiter copilot returned no answer response_id=%s", response.id)
             await self._agent.record_invalid_output(run, related_entity_ids=related)
             raise AgentResponseError("The recruiter copilot returned no answer")
+        if parsed.citations_adjusted:
+            logger.info("Adjusted %s citations that did not match the text response_id=%s", parsed.citations_adjusted, response.id)
 
         await self._agent.record_success(
             run, related_entity_ids=related,
-            output_summary=f"Searched the talent pool for '{job.title}': {len(sources)} sources cited",
+            output_summary=f"Searched the talent pool for '{job.title}': {len(parsed.sources)} sources cited, {parsed.citations_adjusted} citations adjusted",
         )
         return TalentMatchResult(
-            answer=answer,
-            sources=sources,
-            agent_queries=queries,
-            retrieval_plan=await self._plan(queries[0] if queries else question),
+            answer=parsed.text,
+            sources=parsed.sources,
+            citations_adjusted=parsed.citations_adjusted,
+            agent_queries=parsed.queries,
+            retrieval_plan=await self._plan(parsed.queries[0] if parsed.queries else question),
             execution_id=response.id,
             agent_name=self._agent.agent_name,
             agent_version=run.agent_version,

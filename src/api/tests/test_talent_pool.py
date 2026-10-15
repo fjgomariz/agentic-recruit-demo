@@ -1,4 +1,4 @@
-"""Talent pool matching: answer parsing, retrieval plan, agent service and endpoints."""
+"""Talent pool matching: citation checking, retrieval plan, agent service and endpoints."""
 
 import json
 from types import SimpleNamespace
@@ -21,8 +21,19 @@ from job_fixtures import create_sample_jobs
 
 BLOB = "https://strecruitmentdevqds3kzxb.blob.core.windows.net"
 JONAS = f"{BLOB}/talent-pool/jonas-weber-senior-ux-designer-de.pdf"
+ELENA = f"{BLOB}/talent-pool/elena-petrova-design-systems-lead.pdf"
+YUKI = f"{BLOB}/talent-pool/yuki-tanaka-ai-product-designer.pdf"
 BANDS = f"{BLOB}/hiring-policies/compensation-bands.md"
+LANGUAGES = f"{BLOB}/hiring-policies/language-requirements.md"
 SETTINGS = KnowledgeSettings(search_endpoint="https://search.example.net")
+
+SNIPPETS = {
+    JONAS: "Jonas Weber\nSenior UX Designer | Berlin, DE | jonas.weber@example.com\nSprachen: Deutsch, Englisch",
+    ELENA: "Elena Petrova\nDesign Systems Lead | London, UK | elena.petrova@example.com",
+    YUKI: "Yuki Tanaka\nProduct Designer, AI products | London, UK | yuki.tanaka@example.com",
+    BANDS: "# Compensation bands - Northstar (fictional)\n\n| L4 | Senior Product Designer | 64,000 - 82,000 | UK GBP salary band per level",
+    LANGUAGES: "# Language requirements - Northstar (fictional)\n\nEnglish is the working language. German C1 for DACH customer roles.",
+}
 
 # Shapes taken from a live Foundry agent response with the knowledge base MCP tool.
 ACTIVITY = [
@@ -33,62 +44,85 @@ ACTIVITY = [
 ]
 
 
-def document(url: str, snippet: str) -> dict[str, Any]:
-    return {"id": "x", "title": url, "url": url, "content": json.dumps({"blob_url": url, "snippet": snippet})}
+def document(url: str) -> dict[str, Any]:
+    return {"id": "x", "title": url, "url": url, "content": json.dumps({"blob_url": url, "snippet": SNIPPETS[url]})}
 
 
-def agent_response(text_parts: list[tuple[str, list[tuple[str, str]]]], queries: list[str] | None = None) -> SimpleNamespace:
-    """Build a response whose annotations point at the real marker positions in each text part."""
+def agent_response(text: str, markers: list[tuple[str, str]], queries: list[str] | None = None) -> SimpleNamespace:
+    """Build a response whose annotations sit on the real marker positions in the text.
 
-    documents = [document(JONAS, "Jonas Weber\nSenior UX Designer | Berlin, DE | jonas.weber@example.com"), document(BANDS, "# Compensation bands - Northstar (fictional)\n\nEffective 1 January 2026.")]
+    markers lists (marker, url) in order of appearance, so repeated markers get their own position.
+    """
+
+    annotations, cursor = [], 0
+    for marker, url in markers:
+        start = text.index(marker, cursor)
+        annotations.append({"type": "url_citation", "url": url, "start_index": start, "end_index": start + len(marker)})
+        cursor = start + len(marker)
     output: list[dict[str, Any]] = [
         {"type": "mcp_list_tools"},
-        {"type": "mcp_call", "name": "knowledge_base_retrieve", "arguments": json.dumps({"query_variants": queries or ["senior designers london"]}), "output": json.dumps({"documents": documents})},
+        {"type": "mcp_call", "name": "knowledge_base_retrieve", "arguments": json.dumps({"query_variants": queries or ["senior designers london"]}), "output": json.dumps({"documents": [document(url) for url in SNIPPETS]})},
+        {"type": "message", "content": [{"type": "output_text", "text": text, "annotations": annotations}]},
     ]
-    parts = []
-    for text, markers in text_parts:
-        annotations = []
-        for marker, url in markers:
-            start = text.index(marker)
-            annotations.append({"type": "url_citation", "url": url, "start_index": start, "end_index": start + len(marker)})
-        parts.append({"type": "output_text", "text": text, "annotations": annotations})
-    output.append({"type": "message", "content": parts})
     return SimpleNamespace(id="resp_1", output=output, agent_reference={"name": "recruiter-copilot", "version": "2"}, usage=SimpleNamespace(input_tokens=7000, output_tokens=250))
 
 
-def test_parse_answer_numbers_sources_by_first_citation_and_strips_markers() -> None:
-    text = "- **Jonas Weber**: German, 3 months notice.【5:0†source】【5:0†source】\n- Band L4 is GBP 64,000 - 82,000.【5:1†source】 Done.【5:0†source】"
-    response = agent_response([(text, [("【5:0†source】", JONAS), ("【5:1†source】", BANDS)])], queries=["german user research", "german user research", "l4 band"])
-
-    # Annotation indices point at the first occurrence of each marker, so only those are replaced.
-    answer, sources, queries = parse_answer(response)
-
-    assert "【" not in answer and "†" not in answer
-    assert [source.id for source in sources] == [1, 2]
-    assert sources[0].container is KnowledgeSourceKind.TALENT_POOL and sources[0].file_name == "jonas-weber-senior-ux-designer-de.pdf"
-    assert sources[0].title == "Jonas Weber"
-    assert sources[1].container is KnowledgeSourceKind.HIRING_POLICIES and sources[1].title == "Compensation bands"
-    assert answer.startswith("- **Jonas Weber**: German, 3 months notice.[1]")
-    assert "[1][1]" not in answer
-    assert queries == ["german user research", "l4 band"]
+M1, M2, M3 = "【6:0†source】", "【6:1†source】", "【6:2†source】"
 
 
-def test_parse_answer_drops_citations_that_do_not_point_at_a_knowledge_container() -> None:
+def test_citations_that_the_line_supports_are_numbered_by_first_citation_and_markers_are_removed() -> None:
+    text = f"- **Jonas Weber** speaks German; notice is 3 months.{M1}\n- The UK L4 salary band for a Senior Product Designer is GBP 64,000 - 82,000.{M2}"
+    parsed = parse_answer(agent_response(text, [(M1, JONAS), (M2, BANDS)], queries=["german user research", "german user research", "l4 band"]))
+
+    assert parsed.text == "- **Jonas Weber** speaks German; notice is 3 months.[1]\n- The UK L4 salary band for a Senior Product Designer is GBP 64,000 - 82,000.[2]"
+    assert [(s.id, s.container, s.file_name, s.title) for s in parsed.sources] == [
+        (1, KnowledgeSourceKind.TALENT_POOL, "jonas-weber-senior-ux-designer-de.pdf", "Jonas Weber"),
+        (2, KnowledgeSourceKind.HIRING_POLICIES, "compensation-bands.md", "Compensation bands - Northstar (fictional)".split(" - ")[0]),
+    ]
+    assert parsed.citations_adjusted == 0 and "【" not in parsed.text
+    assert parsed.queries == ["german user research", "l4 band"]
+
+
+def test_a_citation_that_points_at_another_candidates_resume_is_corrected_to_the_named_candidate() -> None:
+    # Seen live: the line about Elena cited Yuki's resume and the line about Yuki cited Elena's.
+    text = f"- **Elena Petrova**: 3 months notice, GBP 92,000.{M1}\n- **Yuki Tanaka**: 2 months notice, GBP 74,000.{M2}"
+    parsed = parse_answer(agent_response(text, [(M1, YUKI), (M2, ELENA)]))
+
+    assert parsed.text == "- **Elena Petrova**: 3 months notice, GBP 92,000.[1]\n- **Yuki Tanaka**: 2 months notice, GBP 74,000.[2]"
+    assert [s.title for s in parsed.sources] == ["Elena Petrova", "Yuki Tanaka"]
+    assert parsed.citations_adjusted == 4
+
+
+def test_a_policy_citation_is_dropped_when_the_sentence_is_about_something_else() -> None:
+    # Seen live: a salary band sentence cited the language requirements policy.
+    text = f"- The compensation band is GBP 64,000 - 82,000 for this level.{M1}\n- English is the working language.{M2}"
+    parsed = parse_answer(agent_response(text, [(M1, LANGUAGES), (M2, LANGUAGES)]))
+
+    assert parsed.text == "- The compensation band is GBP 64,000 - 82,000 for this level.\n- English is the working language.[1]"
+    assert [s.file_name for s in parsed.sources] == ["language-requirements.md"]
+    assert parsed.citations_adjusted == 1
+
+
+def test_a_resume_cited_by_a_line_that_names_nobody_is_dropped_and_a_named_candidate_gets_their_resume() -> None:
+    text = f"**Policy points:** confirm consent before contacting anyone.{M1}\n- **Jonas Weber** speaks German."
+    parsed = parse_answer(agent_response(text, [(M1, ELENA)]))
+
+    assert parsed.text == "**Policy points:** confirm consent before contacting anyone.\n- **Jonas Weber** speaks German.[1]"
+    assert [s.title for s in parsed.sources] == ["Jonas Weber"]
+    assert parsed.citations_adjusted == 2
+
+
+def test_citations_to_documents_the_agent_never_retrieved_are_dropped() -> None:
     other = f"{BLOB}/resumes/application-123.pdf"
-    traversal = f"{BLOB}/talent-pool/..%2Fsecrets.pdf"
-    text = "Candidate.【1:0†source】 Another.【1:1†source】 Third.【1:2†source】"
-    response = agent_response([(text, [("【1:0†source】", other), ("【1:1†source】", traversal), ("【1:2†source】", JONAS)])])
-
-    answer, sources, _ = parse_answer(response)
-
-    assert [source.file_name for source in sources] == ["jonas-weber-senior-ux-designer-de.pdf"]
-    assert answer == "Candidate. Another. Third.[1]"
+    text = f"Hello.{M1}"
+    parsed = parse_answer(agent_response(text, [(M1, other)]))
+    assert parsed.text == "Hello." and parsed.sources == [] and parsed.citations_adjusted == 1
 
 
 def test_parse_answer_tolerates_missing_annotations_and_plain_objects() -> None:
     response = SimpleNamespace(id="r", output=[SimpleNamespace(to_dict=lambda: {"type": "message", "content": [{"type": "output_text", "text": "Hello.【3:4†source】", "annotations": []}]})])
-    answer, sources, queries = parse_answer(response)
-    assert answer == "Hello." and sources == [] and queries == []
+    parsed = parse_answer(response)
+    assert (parsed.text, parsed.sources, parsed.queries) == ("Hello.", [], [])
 
 
 def test_plan_from_activity_summarizes_planning_subqueries_and_reasoning() -> None:
@@ -159,20 +193,23 @@ def service(response: Any, knowledge: FakeKnowledge | None = None) -> tuple[Tale
 
 
 JOB = create_sample_jobs()[0]
-GOOD_RESPONSE = agent_response([("- **Jonas Weber**【5:0†source】", [("【5:0†source】", JONAS)])], queries=["senior product designer london"])
+
+
+def good_response() -> SimpleNamespace:
+    return agent_response(f"- **Jonas Weber** speaks German.{M1}", [(M1, JONAS)], queries=["senior product designer london"])
 
 
 @pytest.mark.asyncio
 async def test_match_calls_the_copilot_by_name_records_the_run_and_replays_the_plan() -> None:
-    agent, responses, knowledge, recorder = service(GOOD_RESPONSE)
+    agent, responses, knowledge, recorder = service(good_response())
 
     result = await agent.match(JOB, "German speakers only")
 
     call = responses.calls[0]
     assert call["extra_body"] == {"agent_reference": {"name": "recruiter-copilot", "type": "agent_reference"}}
     assert "Title: Senior Product Designer" in call["input"] and "German speakers only" in call["input"]
-    assert result.answer == "- **Jonas Weber**[1]" and result.sources[0].title == "Jonas Weber"
-    assert result.agent_queries == ["senior product designer london"]
+    assert result.answer == "- **Jonas Weber** speaks German.[1]" and result.sources[0].title == "Jonas Weber"
+    assert result.citations_adjusted == 0 and result.agent_queries == ["senior product designer london"]
     assert knowledge.questions == ["senior product designer london"]
     assert result.retrieval_plan is not None and len(result.retrieval_plan.steps) == 4
     assert (result.execution_id, result.agent_version, result.input_tokens, result.output_tokens) == ("resp_1", "2", 7000, 250)
@@ -181,7 +218,7 @@ async def test_match_calls_the_copilot_by_name_records_the_run_and_replays_the_p
 
 @pytest.mark.asyncio
 async def test_match_still_answers_when_the_retrieval_plan_cannot_be_read() -> None:
-    agent, *_ = service(GOOD_RESPONSE, FakeKnowledge(fail=True))
+    agent, *_ = service(good_response(), FakeKnowledge(fail=True))
     result = await agent.match(JOB)
     assert result.answer and result.retrieval_plan is None
 
@@ -212,13 +249,13 @@ def client() -> TestClient:
 
 
 def test_endpoint_returns_camel_case_result_and_maps_errors(client: TestClient) -> None:
-    agent, *_ = service(GOOD_RESPONSE)
+    agent, *_ = service(good_response())
     app.dependency_overrides[get_talent_pool_agent] = lambda: agent
 
     response = client.post("/jobs/senior-product-designer/talent-matches", json={"notes": "german"})
     assert response.status_code == 200
     body = response.json()
-    assert body["executionId"] == "resp_1" and body["agentQueries"] == ["senior product designer london"]
+    assert body["executionId"] == "resp_1" and body["agentQueries"] == ["senior product designer london"] and body["citationsAdjusted"] == 0
     assert body["sources"][0] == {"id": 1, "container": "talent-pool", "fileName": "jonas-weber-senior-ux-designer-de.pdf", "title": "Jonas Weber"}
     assert body["retrievalPlan"]["steps"][1]["knowledgeSource"] == "talent-pool-ks"
 
