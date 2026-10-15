@@ -168,6 +168,20 @@ def test_knowledge_connection_is_deployed_for_dev_without_secrets() -> None:
     assert 'AZURE_SEARCH_ENDPOINT="$(azd env get-value AZURE_SEARCH_ENDPOINT)"' in workflow
 
 
+def test_api_reads_the_knowledge_base_and_documents_with_its_own_identity() -> None:
+    main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+
+    # The retrieval plan is read with the API identity (Search Index Data Reader), never with keys.
+    assert "module apiSearchAccess './modules/search-role.bicep' = if (deployKnowledge)" in main
+    assert "principalId: apiIdentity.outputs.principalId\n    roleDefinitionId: searchIndexDataReaderRoleId" in main
+    for variable in ("AZURE_SEARCH_ENDPOINT", "KNOWLEDGE_BASE_NAME", "RECRUITER_COPILOT_AGENT_NAME",
+                     "AZURE_STORAGE_TALENT_POOL_CONTAINER_NAME", "AZURE_STORAGE_HIRING_POLICIES_CONTAINER_NAME"):
+        assert f"name: '{variable}'" in main
+    # Opening cited documents must not depend on the one-off seed job being deployed.
+    assert "module apiTalentPoolAccess './modules/blob-container-access.bicep' = if (deployKnowledge)" in main
+    assert "module apiHiringPoliciesAccess './modules/blob-container-access.bicep' = if (deployKnowledge)" in main
+
+
 def test_dev_reuses_existing_foundry_account() -> None:
     main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
     dev = (ROOT / "infra" / "parameters" / "dev.bicepparam").read_text(encoding="utf-8")

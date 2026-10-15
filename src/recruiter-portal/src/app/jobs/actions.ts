@@ -3,8 +3,25 @@
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import type { Job, JobStatus } from "@domain";
-import { ApiError, createJob, draftJobDescription, getJob, updateJob, type JobDescriptionDraftResult, type JobDescriptionRequest } from "@/data/jobs";
+import { ApiError, createJob, draftJobDescription, findTalentMatches, getJob, updateJob, type JobDescriptionDraftResult, type JobDescriptionRequest, type TalentMatchResult } from "@/data/jobs";
 import { createJobId, readJobForm, validateJobForm, type JobFormState } from "@/lib/job-form";
+
+/** Outcome of a talent pool search returned to the job page. */
+export type TalentMatchState = { result: TalentMatchResult; error?: undefined } | { result?: undefined; error: string };
+
+const maxTalentNotesLength = 500;
+
+/** Asks the recruiter copilot which past candidates in the talent pool fit this job. */
+export async function searchTalentPool(jobId: string, notes: string): Promise<TalentMatchState> {
+  const guidance = notes.trim();
+  if (guidance.length > maxTalentNotesLength) return { error: `Keep the guidance under ${maxTalentNotesLength} characters.` };
+  try {
+    return { result: await findTalentMatches(jobId, guidance) };
+  } catch (error) {
+    if (error instanceof ApiError) return { error: `The recruiter copilot could not search the talent pool: ${error.message}` };
+    return { error: "The recruiter copilot did not respond in time. Try again." };
+  }
+}
 
 /** Outcome of an AI generation request returned to the job form. */
 export type GenerateDescriptionState = { result: JobDescriptionDraftResult; error?: undefined } | { result?: undefined; error: string };

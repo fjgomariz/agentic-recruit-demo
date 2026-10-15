@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { changeJobStatus } from "@/app/jobs/actions";
 import { ApplicationsTable } from "@/components/applications-table";
+import { TalentPoolPanel } from "@/components/talent-pool-panel";
 import { getJob, getJobApplications } from "@/data/jobs";
 import { StatusBadge } from "@/components/ui";
 
@@ -35,5 +36,6 @@ export default async function JobDetails({ params }: { params: Promise<{ id: str
       <div className="flex items-center justify-between border-b border-slate-100 p-5"><div><h2 className="font-bold">Recent applications</h2><p className="mt-1 text-sm text-slate-500">Candidates who applied on the careers site</p></div><Link href={`/jobs/${job.id}/applications`} className="text-sm font-semibold text-cyan-700">View all</Link></div>
       {applications ? <ApplicationsTable applications={applications.slice(0, recentApplicationsShown)} /> : <p className="p-8 text-center text-sm text-rose-700">Applications could not be loaded right now. Try again shortly.</p>}
     </section>
+    <TalentPoolPanel jobId={job.id} />
   </>;
 }

@@ -170,3 +170,66 @@ export async function draftJobDescription(request: JobDescriptionRequest): Promi
   if (!response.ok) throw await readError(response, `Failed to generate a job description: ${response.status}`);
   return (await response.json()) as JobDescriptionDraftResult;
 }
+
+/** Knowledge sources the recruiter copilot searches; also the only containers whose documents can be opened. */
+export const knowledgeContainers = ["talent-pool", "hiring-policies"] as const;
+export type KnowledgeContainer = (typeof knowledgeContainers)[number];
+
+/** A document the copilot cited. The id matches the [n] markers in the answer. */
+export interface TalentMatchSource {
+  id: number;
+  container: KnowledgeContainer;
+  fileName: string;
+  title: string;
+}
+
+/** One step the knowledge base took: planning the question, a subquery on one source, or agentic reasoning. */
+export interface RetrievalStep {
+  kind: "planning" | "search" | "reasoning";
+  knowledgeSource?: string | null;
+  query?: string | null;
+  documentCount?: number | null;
+  elapsedMs?: number | null;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningTokens?: number | null;
+}
+
+/** How the knowledge base broke the question down, replayed with the question the agent sent. */
+export interface RetrievalPlan {
+  steps: RetrievalStep[];
+  reasoningEffort?: string | null;
+}
+
+/** The recruiter copilot's answer with its citations, how it searched, and the traceable run. */
+export interface TalentMatchResult {
+  answer: string;
+  sources: TalentMatchSource[];
+  agentQueries: string[];
+  retrievalPlan?: RetrievalPlan | null;
+  executionId: string;
+  agentName: string;
+  agentVersion?: string | null;
+  durationMs: number;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+}
+
+/** Asks the recruiter copilot, through the API, which talent pool candidates fit a job. */
+export async function findTalentMatches(jobId: string, notes: string): Promise<TalentMatchResult> {
+  const response = await fetch(`${apiBaseUrl}/jobs/${encodeURIComponent(jobId)}/talent-matches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok) throw await readError(response, `Failed to search the talent pool: ${response.status}`);
+  return (await response.json()) as TalentMatchResult;
+}
+
+/** Streams a talent pool resume or hiring policy from the API. */
+export async function downloadKnowledgeDocument(container: string, fileName: string): Promise<Response> {
+  return fetch(`${apiBaseUrl}/knowledge-documents/${encodeURIComponent(container)}/${encodeURIComponent(fileName)}`, { cache: "no-store" });
+}

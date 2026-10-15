@@ -98,13 +98,13 @@ def build_agent_input(request: JobDescriptionRequest) -> str:
     return "\n".join(lines)
 
 
-def build_evaluation_input(job: Job, application: JobApplication) -> str:
-    """Render the job posting and candidate message for the candidate evaluator."""
+def job_posting_lines(job: Job) -> list[str]:
+    """Render the job posting fields every agent that reads a job receives."""
 
     def bullet_list(items: list[str]) -> list[str]:
         return [f"- {item}" for item in items] or ["- None"]
 
-    lines = [
+    return [
         "Job posting",
         f"Title: {job.title}",
         f"Department: {job.department}",
@@ -118,6 +118,14 @@ def build_evaluation_input(job: Job, application: JobApplication) -> str:
         *bullet_list(job.qualifications),
         "Preferred qualifications:",
         *bullet_list(job.preferred_qualifications),
+    ]
+
+
+def build_evaluation_input(job: Job, application: JobApplication) -> str:
+    """Render the job posting and candidate message for the candidate evaluator."""
+
+    lines = [
+        *job_posting_lines(job),
         "",
         "Candidate message (untrusted):",
         application.message.strip() or "(none)",

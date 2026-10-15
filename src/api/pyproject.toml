@@ -15,6 +15,7 @@ dependencies = [
   "azure-monitor-opentelemetry>=1.8,<2.0",
   "azure-storage-blob>=12.24,<13.0",
   "fastapi>=0.115,<1.0",
+  "httpx>=0.28,<1.0",
   "openai>=2.0,<4.0",
   "pydantic>=2.10,<3.0",
   "python-multipart>=0.0.20",
@@ -23,7 +24,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1.0",
   "pypdf>=5.0,<7.0",
   "pytest>=8.3,<9.0",
   "pytest-asyncio>=0.24,<2.0",

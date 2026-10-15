@@ -57,6 +57,7 @@ class AgentSettings:
     job_description_agent_name: str = "job-description-writer"
     candidate_evaluation_agent_name: str = "candidate-evaluator"
     candidate_review_agent_name: str = "candidate-evaluation-reviewer"
+    recruiter_copilot_agent_name: str = "recruiter-copilot"
     model_deployment_name: str = "gpt-5.4-mini"
     review_model_deployment_name: str = "gpt-5.4"
 
@@ -69,5 +70,27 @@ class AgentSettings:
             job_description_agent_name=os.getenv("JOB_DESCRIPTION_AGENT_NAME", "job-description-writer"),
             candidate_evaluation_agent_name=os.getenv("CANDIDATE_EVALUATION_AGENT_NAME", "candidate-evaluator"),
             candidate_review_agent_name=os.getenv("CANDIDATE_REVIEW_AGENT_NAME", "candidate-evaluation-reviewer"),
+            recruiter_copilot_agent_name=os.getenv("RECRUITER_COPILOT_AGENT_NAME", "recruiter-copilot"),
             model_deployment_name=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-5.4-mini"),
+        )
+
+
+@dataclass(frozen=True)
+class KnowledgeSettings:
+    """Foundry IQ knowledge base (Azure AI Search) and the private containers its documents come from."""
+
+    search_endpoint: str | None
+    knowledge_base_name: str = "recruiting-iq"
+    talent_pool_container_name: str = "talent-pool"
+    hiring_policies_container_name: str = "hiring-policies"
+
+    @classmethod
+    def from_environment(cls) -> "KnowledgeSettings":
+        """Load knowledge settings; a missing Search endpoint disables the talent pool instead of failing startup."""
+
+        return cls(
+            search_endpoint=(os.getenv("AZURE_SEARCH_ENDPOINT") or "").rstrip("/") or None,
+            knowledge_base_name=os.getenv("KNOWLEDGE_BASE_NAME", "recruiting-iq"),
+            talent_pool_container_name=os.getenv("AZURE_STORAGE_TALENT_POOL_CONTAINER_NAME", "talent-pool"),
+            hiring_policies_container_name=os.getenv("AZURE_STORAGE_HIRING_POLICIES_CONTAINER_NAME", "hiring-policies"),
         )

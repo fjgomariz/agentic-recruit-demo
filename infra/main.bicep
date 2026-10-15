@@ -90,6 +90,9 @@ param candidateEvaluationAgentName string = 'candidate-evaluator'
 @description('Name of the Foundry agent that reviews candidate evaluations.')
 param candidateReviewAgentName string = 'candidate-evaluation-reviewer'
 
+@description('Name of the Foundry agent that finds past candidates in the talent pool with Foundry IQ.')
+param recruiterCopilotAgentName string = 'recruiter-copilot'
+
 @description('Client ID of the Microsoft Entra app registration that protects both portals (created by infra/scripts/setup-auth.ps1). Empty leaves the portals open; the API is never exposed to the internet.')
 param authClientId string = ''
 
@@ -284,9 +287,9 @@ module apiResumesAccess './modules/blob-container-access.bicep' = {
   }
 }
 
-// Seeding the knowledge sources runs inside the virtual network (the storage account is private only), so the
-// API identity gets write access to the two knowledge source containers and nothing else.
-module apiTalentPoolAccess './modules/blob-container-access.bicep' = if (deploySeedJob) {
+// The API identity reads and seeds the two knowledge source containers (the seed job runs as this identity and the
+// recruiter portal opens the cited documents through the API); it gets access to those containers and nothing else.
+module apiTalentPoolAccess './modules/blob-container-access.bicep' = if (deployKnowledge) {
   scope: resourceGroup
   params: {
     storageAccountName: storage.outputs.storageAccountName
@@ -295,7 +298,7 @@ module apiTalentPoolAccess './modules/blob-container-access.bicep' = if (deployS
   }
 }
 
-module apiHiringPoliciesAccess './modules/blob-container-access.bicep' = if (deploySeedJob) {
+module apiHiringPoliciesAccess './modules/blob-container-access.bicep' = if (deployKnowledge) {
   scope: resourceGroup
   params: {
     storageAccountName: storage.outputs.storageAccountName
@@ -403,6 +406,16 @@ module projectSearchAccess './modules/search-role.bicep' = if (deployKnowledge) 
   }
 }
 
+// The API asks the knowledge base how it planned a search (the retrieval activity log) as its own identity.
+module apiSearchAccess './modules/search-role.bicep' = if (deployKnowledge) {
+  scope: resourceGroup
+  params: {
+    searchServiceName: search!.outputs.searchServiceName
+    principalId: apiIdentity.outputs.principalId
+    roleDefinitionId: searchIndexDataReaderRoleId
+  }
+}
+
 // The agent calls the knowledge base MCP endpoint through a project connection that signs in as the project identity.
 module knowledgeBaseConnection './modules/foundry-knowledge-connection.bicep' = if (deployKnowledge) {
   scope: resourceGroup
@@ -458,7 +471,7 @@ module api './modules/container-app.bicep' = if (deployApps) {
     // Only the portals call the API, from their servers, so it stays internal to the environment.
     external: false
     userAssignedIdentityId: apiIdentity.outputs.id
-    env: [
+    env: concat([
       { name: 'AZURE_CLIENT_ID', value: apiIdentity.outputs.clientId }
       { name: 'AZURE_COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'AZURE_COSMOS_DATABASE_NAME', value: cosmos.outputs.databaseName }
@@ -471,9 +484,15 @@ module api './modules/container-app.bicep' = if (deployApps) {
       { name: 'JOB_DESCRIPTION_AGENT_NAME', value: jobDescriptionAgentName }
       { name: 'CANDIDATE_EVALUATION_AGENT_NAME', value: candidateEvaluationAgentName }
       { name: 'CANDIDATE_REVIEW_AGENT_NAME', value: candidateReviewAgentName }
+      { name: 'RECRUITER_COPILOT_AGENT_NAME', value: recruiterCopilotAgentName }
       { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundryModelDeploymentName }
       { name: 'OTEL_SERVICE_NAME', value: 'recruitment-api' }
-    ]
+    ], deployKnowledge ? [
+      { name: 'AZURE_SEARCH_ENDPOINT', value: search!.outputs.searchEndpoint }
+      { name: 'KNOWLEDGE_BASE_NAME', value: knowledgeBaseName }
+      { name: 'AZURE_STORAGE_TALENT_POOL_CONTAINER_NAME', value: storage.outputs.talentPoolContainerName }
+      { name: 'AZURE_STORAGE_HIRING_POLICIES_CONTAINER_NAME', value: storage.outputs.hiringPoliciesContainerName }
+    ] : [])
     secretEnv: {
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.applicationInsightsConnectionString
     }

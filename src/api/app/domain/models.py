@@ -121,6 +121,64 @@ class JobDescriptionDraftResult(DomainModel):
     agent_version: str | None = None
 
 
+class TalentMatchRequest(DomainModel):
+    """Optional recruiter guidance added to the talent pool search for a job."""
+
+    notes: str = Field(default="", max_length=500)
+
+
+class KnowledgeSourceKind(StrEnum):
+    """Which knowledge source a cited document belongs to."""
+
+    TALENT_POOL = "talent-pool"
+    HIRING_POLICIES = "hiring-policies"
+
+
+class TalentMatchSource(DomainModel):
+    """A document the agent cited. The number matches the [n] markers in the answer."""
+
+    id: int
+    container: KnowledgeSourceKind
+    file_name: str
+    title: str
+
+
+class RetrievalStep(DomainModel):
+    """One step the knowledge base took to answer: planning, a subquery on one source, or reasoning."""
+
+    kind: Literal["planning", "search", "reasoning"]
+    knowledge_source: str | None = None
+    query: str | None = None
+    document_count: int | None = None
+    elapsed_ms: int | None = None
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    reasoning_tokens: int | None = None
+
+
+class RetrievalPlan(DomainModel):
+    """How the knowledge base broke the question down. Replayed with the question the agent sent."""
+
+    steps: list[RetrievalStep]
+    reasoning_effort: str | None = None
+
+
+class TalentMatchResult(DomainModel):
+    """The agent's answer with citations, plus how it searched and the traceable run."""
+
+    answer: str
+    sources: list[TalentMatchSource]
+    agent_queries: list[str]
+    retrieval_plan: RetrievalPlan | None = None
+    execution_id: str
+    agent_name: str
+    agent_version: str | None = None
+    duration_ms: int
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
 class ApplicationStage(StrEnum):
     """Current workflow stage of an application."""
 

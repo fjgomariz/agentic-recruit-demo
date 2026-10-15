@@ -7,13 +7,13 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 
-from app.config import CosmosSettings, StorageSettings
+from app.config import CosmosSettings, KnowledgeSettings, StorageSettings
 from app.dependencies import recording
 from app.dependencies.agents import CandidateEvaluationAgent, CandidateReviewAgent
 from app.domain import AgentExecution, Job
 from app.repositories import CosmosAgentExecutionRepository, CosmosApplicationRepository, CosmosJobRepository
 from app.services import ApplicationService, CrudService, EvaluationService
-from app.storage import BlobResumeStore
+from app.storage import BlobResumeStore, KnowledgeDocumentStore
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ _job_repository: CosmosJobRepository | None = None
 _job_service: CrudService[Job] | None = None
 _application_repository: CosmosApplicationRepository | None = None
 _resume_store: BlobResumeStore | None = None
+_knowledge_store: KnowledgeDocumentStore | None = None
 _job_service_task: asyncio.Task[None] | None = None
 
 
@@ -61,11 +62,12 @@ async def _connect_job_service_with_retry(settings: CosmosSettings) -> None:
 async def initialize_job_service() -> None:
     """Validate configuration, open the resume store, and connect to Cosmos DB in the background."""
 
-    global _job_service_task, _resume_store
+    global _job_service_task, _resume_store, _knowledge_store
     settings = CosmosSettings.from_environment()
     storage_settings = StorageSettings.from_environment()
     if storage_settings.blob_endpoint:
         _resume_store = BlobResumeStore(storage_settings)
+        _knowledge_store = KnowledgeDocumentStore(storage_settings, KnowledgeSettings.from_environment())
     else:
         logger.warning("AZURE_STORAGE_BLOB_ENDPOINT is not set; candidate applications are disabled")
     _job_service_task = asyncio.create_task(_connect_job_service_with_retry(settings))
@@ -74,7 +76,7 @@ async def initialize_job_service() -> None:
 async def close_job_service() -> None:
     """Stop pending connection attempts and close the Cosmos DB and Blob Storage clients."""
 
-    global _job_repository, _job_service, _job_service_task, _application_repository, _resume_store
+    global _job_repository, _job_service, _job_service_task, _application_repository, _resume_store, _knowledge_store
     if _job_service_task is not None:
         _job_service_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -83,11 +85,14 @@ async def close_job_service() -> None:
         await _job_repository.close()
     if _resume_store is not None:
         await _resume_store.close()
+    if _knowledge_store is not None:
+        await _knowledge_store.close()
     _job_repository = None
     _job_service = None
     _job_service_task = None
     _application_repository = None
     _resume_store = None
+    _knowledge_store = None
     recording.set_repository(None)
 
 
@@ -136,7 +141,16 @@ def get_agent_execution_log() -> AgentExecutionLog:
     return AgentExecutionLog()
 
 
+def get_knowledge_document_store() -> KnowledgeDocumentStore:
+    """Provide read access to the talent pool and hiring policy documents."""
+
+    if _knowledge_store is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Document storage is not configured.")
+    return _knowledge_store
+
+
 JobService = Annotated[CrudService[Job], Depends(get_job_service)]
 ApplicationServiceDependency = Annotated[ApplicationService, Depends(get_application_service)]
 EvaluationServiceDependency = Annotated[EvaluationService, Depends(get_evaluation_service)]
 AgentExecutionLogDependency = Annotated[AgentExecutionLog, Depends(get_agent_execution_log)]
+KnowledgeDocumentStoreDependency = Annotated[KnowledgeDocumentStore, Depends(get_knowledge_document_store)]

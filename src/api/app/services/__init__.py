@@ -11,6 +11,7 @@ from .agents import (
 from .applications import ApplicationNotAllowedError, ApplicationService
 from .crud import CrudService, EntityAlreadyExistsError, EntityNotFoundError
 from .evaluations import EvaluationInProgressError, EvaluationService
+from .talent_pool import KnowledgeBaseClient, TalentPoolAgentService
 
 __all__ = [
     "AgentInputRejectedError",
@@ -26,4 +27,6 @@ __all__ = [
     "EvaluationInProgressError",
     "EvaluationService",
     "JobDescriptionAgentService",
+    "KnowledgeBaseClient",
+    "TalentPoolAgentService",
 ]
