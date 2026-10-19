@@ -42,18 +42,23 @@ param maxReplicas int = 3
 @description('Expose the app to the internet. False keeps it reachable only from apps in the same Container Apps environment.')
 param external bool = true
 
-@description('Client ID of the Microsoft Entra app registration that users must sign in with. Empty leaves the app without authentication.')
-param authClientId string = ''
+@description('Public IP ranges (CIDR) allowed to reach an external app. An empty list blocks all internet traffic instead of opening the app to everyone.')
+param allowedIpRanges array = []
 
-@description('Paths that skip authentication, such as a health check that returns no data.')
-param authExcludedPaths array = []
-
+@description('Make sure no built-in authentication stays enabled from earlier deployments. Incremental deployments do not delete a removed authConfigs resource.')
+param disableBuiltInAuth bool = false
 var probeTarget = empty(healthPath)
   ? { tcpSocket: { port: targetPort } }
   : { httpGet: { path: healthPath, port: targetPort } }
 
-var azureCliClientId = '04b07795-8ddb-461a-bbee-02f9e1bf7b46'
-
+// Container Apps treats an empty restriction list as open to the internet, so fail closed with a range nobody can use.
+var effectiveIpRanges = empty(allowedIpRanges) ? [ '192.0.2.1/32' ] : allowedIpRanges
+var ipSecurityRestrictions = [for (range, i) in effectiveIpRanges: {
+  name: 'allow-'
+  description: 'Allowed client range'
+  ipAddressRange: range
+  action: 'Allow'
+}]
 resource app 'Microsoft.App/containerApps@2025-07-01' = {
   name: name
   location: location
@@ -77,6 +82,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
         targetPort: targetPort
         transport: 'auto'
         allowInsecure: false
+        ipSecurityRestrictions: external ? ipSecurityRestrictions : null
       }
     }
     template: {
@@ -120,34 +126,14 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
   }
 }
 
-// Built-in authentication: every request must carry a Microsoft Entra session for an assigned user.
-// Without a client secret the platform uses the OpenID Connect ID token flow, so there is no secret to rotate.
-resource auth 'Microsoft.App/containerApps/authConfigs@2025-07-01' = if (!empty(authClientId)) {
+// Earlier versions signed users in with Microsoft Entra. Access is now limited by network rules, so keep the
+// built-in authentication switched off.
+resource auth 'Microsoft.App/containerApps/authConfigs@2025-07-01' = if (disableBuiltInAuth) {
   parent: app
   name: 'current'
   properties: {
     platform: {
-      enabled: true
-    }
-    globalValidation: {
-      unauthenticatedClientAction: 'RedirectToLoginPage'
-      redirectToProvider: 'azureactivedirectory'
-      excludedPaths: authExcludedPaths
-    }
-    identityProviders: {
-      azureActiveDirectory: {
-        enabled: true
-        registration: {
-          clientId: authClientId
-          openIdIssuer: '${environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
-        }
-        validation: {
-          defaultAuthorizationPolicy: {
-            // Interactive sign-ins, plus Azure CLI tokens for scripted access by the same assigned users.
-            allowedApplications: [ authClientId, azureCliClientId ]
-          }
-        }
-      }
+      enabled: false
     }
   }
 }
