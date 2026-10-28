@@ -1,0 +1,91 @@
+{
+  "description": "Questions for the recruiter-copilot over the synthetic talent pool and hiring policies. expected_files are the documents that must be retrieved and cited; ground_truth is the reference answer; expect_unknown marks questions the knowledge base cannot answer.",
+  "cases": [
+    {
+      "id": "role-and-band",
+      "category": "multi-source",
+      "query": "Which candidates in our talent pool could fill a Senior Product Designer role in London, and is each one's salary expectation inside our band for that level?",
+      "expected_files": ["yuki-tanaka-ai-product-designer.pdf", "compensation-bands.md"],
+      "ground_truth": "The Senior Product Designer role is level L4, with a UK band of GBP 64,000 - 82,000. Yuki Tanaka (AI product designer, 6 years, expects GBP 74,000) fits and is inside the band. Other London candidates such as Elena Petrova (GBP 92,000) and Hannah Cole (GBP 125,000) are above the band, and Priya Nair (GBP 52,000) is below it."
+    },
+    {
+      "id": "band-head-of-design",
+      "category": "multi-hop",
+      "query": "Is Hannah Cole's salary expectation inside the band for a Head of Design role in the UK?",
+      "expected_files": ["hannah-cole-head-of-design.pdf", "compensation-bands.md"],
+      "ground_truth": "Yes. Hannah Cole expects GBP 125,000 and the UK band for Head of Design (L6) is GBP 105,000 - 130,000."
+    },
+    {
+      "id": "band-eu-currency",
+      "category": "multi-hop",
+      "query": "Sofia Marin expects EUR 62,000. Is that inside the band for a Senior Product Designer based in Spain?",
+      "expected_files": ["sofia-marin-disenadora-producto-es.pdf", "compensation-bands.md"],
+      "ground_truth": "Yes. Senior Product Designer is level L4 and the Germany/Spain/Portugal band is EUR 56,000 - 74,000, so EUR 62,000 is inside it."
+    },
+    {
+      "id": "synonym-research",
+      "category": "synonyms",
+      "query": "Do we have anyone in the pool who has done user research for HR or recruiting tools?",
+      "expected_files": ["nadia-haddad-ux-research-lead.pdf", "aisha-khan-interaction-designer.pdf"],
+      "ground_truth": "Nadia Haddad (User Research Lead, led discovery research and usability studies for recruiter tools at an HR tech company) and Aisha Khan (Interaction Designer at an HR tech company who ran research sessions with recruiters) both have this experience."
+    },
+    {
+      "id": "typos",
+      "category": "typos",
+      "query": "Find designers with conversational interface experience.",
+      "expected_files": ["aisha-khan-interaction-designer.pdf"],
+      "ground_truth": "Aisha Khan designed a chatbot-assisted candidate screening flow and has conversational UI experience, even though her resume has several spelling mistakes."
+    },
+    {
+      "id": "german-customer-success",
+      "category": "multilingual",
+      "query": "Who in the talent pool is a native German speaker and could support DACH customers, and what does our language policy require for those roles?",
+      "expected_files": ["julia-hoffmann-customer-success.pdf", "language-requirements.md"],
+      "ground_truth": "Julia Hoffmann (Customer Success Managerin, German native) fits. Roles that support DACH customers such as Customer Success, Sales and Support require German at C1 or higher; for design and engineering roles additional languages are never required."
+    },
+    {
+      "id": "spanish-question",
+      "category": "multilingual",
+      "query": "¿Hay candidatos con experiencia en fintech que hablen español?",
+      "expected_files": ["sofia-marin-disenadora-producto-es.pdf"],
+      "ground_truth": "Sofia Marin, senior product designer in Madrid, has B2B fintech experience (Cuenta Clara, Ibero Pagos) and Spanish as her native language. The answer must be written in Spanish."
+    },
+    {
+      "id": "ai-skills",
+      "category": "skills",
+      "query": "Who has hands-on experience with retrieval-augmented generation and evaluating AI answers?",
+      "expected_files": ["mateo-silva-ml-engineer-rag.pdf"],
+      "ground_truth": "Mateo Silva, ML engineer in Madrid, built RAG pipelines with hybrid search and semantic reranking and created evaluation suites for answer grounding."
+    },
+    {
+      "id": "accessibility",
+      "category": "skills",
+      "query": "Who has accessibility expertise, such as WCAG, in the pool?",
+      "expected_files": ["ben-ashworth-accessibility-specialist.pdf"],
+      "ground_truth": "Ben Ashworth is an accessibility specialist (WCAG 2.2 audits). Elena Petrova, Jonas Weber and Chen Wei also list accessibility skills."
+    },
+    {
+      "id": "consent-and-retention",
+      "category": "policy",
+      "query": "What must I do before contacting a candidate I found in the talent pool, and how long can we keep their data?",
+      "expected_files": ["data-retention-and-consent.md"],
+      "ground_truth": "Only people who gave explicit consent and whose data is still within retention can be contacted. Pool data is kept at most 24 months from the last contact. The first contact must explain why the candidate was found, link the privacy notice and offer an opt-out."
+    },
+    {
+      "id": "unknown-policy",
+      "category": "not-in-knowledge-base",
+      "query": "What is Northstar's parental leave policy?",
+      "expected_files": [],
+      "expect_unknown": true,
+      "ground_truth": "The knowledge base has no parental leave policy. The assistant must say it does not know and must not invent a policy."
+    },
+    {
+      "id": "unknown-candidate",
+      "category": "not-in-knowledge-base",
+      "query": "Do we have any candidate with Rust and embedded systems experience?",
+      "expected_files": [],
+      "expect_unknown": true,
+      "ground_truth": "No resume in the pool mentions Rust or embedded systems. The assistant must say there is no such candidate and must not invent one."
+    }
+  ]
+}

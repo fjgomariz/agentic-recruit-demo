@@ -97,3 +97,34 @@ Notes:
 - The resume is sent as extracted text. The production agent receives a PDF, so this measures the model and the instructions, not PDF handling. The prompt-shield block on `lena-fischer-visual-designer.pdf` is not part of this evaluation.
 - With six synthetic cases and a model judge, results are directional. Judges can disagree with a human, and a pass rate on a handful of rows is not a statistical result. A human decides before changing the production agent.
 - `infra/main.bicep` declares the `gpt-5.6-sol` deployment in `dev` only, as a candidate model for these runs.
+
+## Evaluating Foundry IQ retrieval for the recruiter copilot
+
+`evaluations/run_retrieval_evaluation.py` evaluates the `recruiter-copilot` agent (unchanged) over the talent pool and hiring policies, and compares the knowledge base's **retrieval reasoning effort** (`minimal`, `low`, `medium`). All runs belong to the evaluation `recruiter-copilot-retrieval-quality` under **Foundry → Build → Evaluations**.
+
+- **Dataset:** [`retrieval-dataset.json`](evaluations/retrieval-dataset.json) has 12 questions: multi-source (candidate plus policy band), multi-hop, synonyms, typos, German and Spanish, skills, consent policy, and two questions the knowledge base cannot answer. Each row lists the documents that must be retrieved and a reference answer.
+- **Code-based criteria** ([`retrieval_graders.py`](evaluations/retrieval_graders.py), run by Foundry in its sandbox): `retrieval_recall` (the expected documents came back from the knowledge base), `citation_recall` (the answer cites them), `citation_precision` (each resume citation sits on a line about that candidate) and `honest_when_missing` (says "I don't know" when it should).
+- **Judge and built-in criteria:** `answer_correct` (model judge against the reference answer) and the Foundry built-in evaluators `groundedness`, `relevance` and `response_completeness` (1-5 scale).
+- **How the variants work:** the knowledge base is shared with the portal, so the script switches `retrievalReasoningEffort` for each run and restores the original value at the end, even on failure. Do not run it while someone is using the Talent pool panel. The agent version is pinned for every run and the script never publishes agents.
+
+```powershell
+$env:AZURE_AI_PROJECT_ENDPOINT = "<project endpoint>"; $env:AZURE_SEARCH_ENDPOINT = "https://<search>.search.windows.net"
+.\.venv\Scripts\python agents/evaluations/run_retrieval_evaluation.py                      # minimal, low and medium
+.\.venv\Scripts\python agents/evaluations/run_retrieval_evaluation.py --efforts low --cases role-and-band unknown-policy
+.\.venv\Scripts\python agents/evaluations/run_retrieval_evaluation.py --report              # compare the latest runs again
+```
+
+The caller needs **Foundry User** on the project and **Search Service Contributor** on the search service. A full run of three efforts takes about 15 minutes.
+
+What the first runs (October 2026, `gpt-5.4-mini`, 12 questions) showed:
+
+| Criterion | minimal | low | medium |
+| --- | --- | --- | --- |
+| retrieval_recall | 1.00 | 0.96 | 0.96 |
+| citation_precision | 0.82 | 0.79 | 0.74 |
+| answer_correct | 0.79 | 0.82 | 0.76 |
+| median latency (s) | 7.7 | 8.3 | 11.0 |
+
+- **No effort level wins clearly.** Running the same configuration twice moved `retrieval_recall` for `low` from 1.00 to 0.96 on the same question, so differences of a few points are noise on 12 questions. `medium` is the slowest and was never better; `low` stays the default.
+- **Retrieval is rarely the problem.** The expected documents come back almost every time, even with typos, other languages and synonyms. The weak point is how the model attaches citations: only about 75-80% of resume citations sit on the right candidate's line. That is why the API checks each citation against its own line before showing it (`citationsAdjusted` in `POST /jobs/{id}/talent-matches`).
+- **Judges are strict and noisy.** `answer_correct` and the built-in evaluators move with the judge prompt (the first, stricter prompt gave about 0.6). Read the failing rows in the portal before drawing conclusions. `relevance` fails on the "I don't know" questions by design.

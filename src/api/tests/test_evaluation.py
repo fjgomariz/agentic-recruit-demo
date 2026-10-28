@@ -182,7 +182,7 @@ def test_api_reads_the_knowledge_base_and_documents_with_its_own_identity() -> N
     assert "module apiHiringPoliciesAccess './modules/blob-container-access.bicep' = if (deployKnowledge)" in main
 
 
-def test_dev_reuses_existing_foundry_account() -> None:
+def test_dev_creates_the_foundry_account_unless_told_to_reuse_it() -> None:
     main = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
     dev = (ROOT / "infra" / "parameters" / "dev.bicepparam").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(encoding="utf-8")
@@ -190,6 +190,6 @@ def test_dev_reuses_existing_foundry_account() -> None:
 
     assert "param reuseExistingFoundry bool = false" in main
     assert "if (reuseExistingFoundry)" in main
-    assert "param reuseExistingFoundry = true" in dev
-    assert "AZURE_FOUNDRY_ACCOUNT_EXISTS true" in workflow
+    assert "param reuseExistingFoundry = false" in dev
+    assert "AZURE_FOUNDRY_ACCOUNT_EXISTS \"${AZURE_FOUNDRY_ACCOUNT_EXISTS:-false}\"" in workflow
     assert "Microsoft.CognitiveServices/accounts@2026-07-01' existing" in existing
