@@ -69,6 +69,7 @@ jobs:
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       # Client ID of the Entra app registration created by infra/scripts/setup-auth.ps1. Empty until that script has run.
       AZURE_AUTH_CLIENT_ID: ${{ vars.AZURE_AUTH_CLIENT_ID }}
+      AZURE_FOUNDRY_ACCOUNT_EXISTS: ${{ vars.AZURE_FOUNDRY_ACCOUNT_EXISTS }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -104,9 +105,9 @@ jobs:
             | python3 -c 'import base64, json, sys; p = sys.stdin.read().split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["oid"])')"
           azd env set AZURE_PRINCIPAL_ID "$principal_id"
           azd env set AZURE_AUTH_CLIENT_ID "${AZURE_AUTH_CLIENT_ID:-}"
-          # The dev Foundry account already exists. Deploy child resources without
-          # rewriting the account, which also isolates account-level policy failures.
-          azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS true
+          # Set the AZURE_FOUNDRY_ACCOUNT_EXISTS environment variable to true to deploy only the child resources of an
+          # existing Foundry account (needed when a tenant policy blocks rewriting the account itself).
+          azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS "${AZURE_FOUNDRY_ACCOUNT_EXISTS:-false}"
           # The synthetic knowledge source data is copied from this exact commit by a job inside the virtual network.
           azd env set SEED_SOURCE_BASE_URL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/samples"
           azd provision --no-prompt

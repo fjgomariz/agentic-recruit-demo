@@ -49,7 +49,7 @@ param agentModelDeployments array = [
     model: 'gpt-5.4'
     version: '2026-03-05'
     skuName: 'GlobalStandard'
-    capacity: 500
+    capacity: 200
   }
 ]
 
