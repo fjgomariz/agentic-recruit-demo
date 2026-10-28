@@ -6,7 +6,7 @@ This folder contains the Azure Developer CLI (`azd`) and modular Bicep foundatio
 
 ```text
 Internet
-└── HTTPS ingress limited to an IP allow list: public portal (3000), recruiter portal (3000)
+└── HTTPS ingress with Microsoft Entra sign-in: public portal (3000), recruiter portal (3000)
     └── External workload-profiles Container Apps environment
         ├── Internal-only ingress: API (8000), called by the portals' servers
         └── Dedicated VNet integration subnet (/23)
@@ -16,7 +16,7 @@ Internet
 
 The VNet also contains a separate private-endpoints subnet. Private DNS zones for Blob Storage and Cosmos DB are linked to the VNet, so workloads use the normal service hostnames while data traffic resolves to private endpoint IP addresses. The three Container Apps are deployed by the same template when the `apiImage`, `publicPortalImage`, and `recruiterPortalImage` parameters are set; see [docs/deployment.md](../docs/deployment.md).
 
-The Container Apps environment remains externally accessible and has public network access enabled, but only the two portals have external ingress and both only accept the IP ranges in `allowedIpRanges` (see [Access: IP allow list](../docs/deployment.md#access-ip-allow-list)). The API has internal ingress and cannot be reached from the internet.
+The Container Apps environment remains externally accessible and has public network access enabled, but only the two portals have external ingress and both require Microsoft Entra sign-in (see [Access and sign-in](../docs/deployment.md#access-and-sign-in)). The API has internal ingress and cannot be reached from the internet.
 
 ## Resource purposes
 
@@ -34,7 +34,7 @@ The Container Apps environment remains externally accessible and has public netw
 | Foundry account and project | AI Services account (`aif-…`, keys disabled) with the `proj-recruitment-<env>` project that hosts the prompt agents in `agents/`. The deployment identity gets Foundry User on the project to publish agent versions. |
 | Model deployments | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM) for the job description writer and the candidate evaluator, and `gpt-5.4` (version `2026-03-05`, GlobalStandard, 500K TPM) for the evaluation reviewer. Declared in `agentModelDeployments`, created one at a time, and pinned with auto-upgrade disabled. |
 | Application Insights connection | Project connection that enables Foundry server-side agent tracing into the shared Application Insights resource. |
-| Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. The API ingress is internal; the portals restrict ingress to `allowedIpRanges` (fail closed when empty) and keep built-in authentication disabled. Deployed only when image parameters are supplied. |
+| Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. The API ingress is internal; the portals use built-in Microsoft Entra authentication (`authConfigs`) when `authClientId` is set. Deployed only when image parameters are supplied. |
 
 ## Layout
 

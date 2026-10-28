@@ -93,10 +93,9 @@ param candidateReviewAgentName string = 'candidate-evaluation-reviewer'
 @description('Name of the Foundry agent that finds past candidates in the talent pool with Foundry IQ.')
 param recruiterCopilotAgentName string = 'recruiter-copilot'
 
-@description('Comma-separated public IP ranges (CIDR) allowed to reach the portals, for example "203.0.113.7/32". Kept out of the repository. When empty both portals refuse all internet traffic; the API is never exposed to the internet.')
-param allowedIpRanges string = ''
+@description('Client ID of the Microsoft Entra app registration that protects both portals (created by infra/scripts/setup-auth.ps1). Empty leaves the portals open; the API is never exposed to the internet.')
+param authClientId string = ''
 
-var allowedIpRangeList = filter(map(split(allowedIpRanges, ','), range => trim(range)), range => !empty(range))
 var deployApps = !empty(apiImage) && !empty(publicPortalImage) && !empty(recruiterPortalImage)
 
 var workloadName = 'recruitment'
@@ -531,8 +530,8 @@ module publicPortal './modules/container-app.bicep' = if (deployApps) {
     environmentId: containerApps.outputs.environmentId
     image: publicPortalImage
     targetPort: 3000
-    allowedIpRanges: allowedIpRangeList
-    disableBuiltInAuth: true
+    authClientId: authClientId
+    authExcludedPaths: [ '/api/health' ]
     env: [
       { name: 'API_BASE_URL', value: api!.outputs.url }
     ]
@@ -548,8 +547,8 @@ module recruiterPortal './modules/container-app.bicep' = if (deployApps) {
     environmentId: containerApps.outputs.environmentId
     image: recruiterPortalImage
     targetPort: 3000
-    allowedIpRanges: allowedIpRangeList
-    disableBuiltInAuth: true
+    authClientId: authClientId
+    authExcludedPaths: [ '/api/health' ]
     env: [
       { name: 'API_BASE_URL', value: api!.outputs.url }
     ]

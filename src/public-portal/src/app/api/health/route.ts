@@ -1,5 +1,5 @@
 /**
- * Health check used by the deployment pipeline: the portal reaches the internal API, which reads Cosmos DB.
+ * Unauthenticated health check used by the deployment pipeline (the only path excluded from sign-in).
  * It confirms the portal can reach the internal API and the API can read Cosmos DB, without returning any data.
  */
 export const dynamic = "force-dynamic";

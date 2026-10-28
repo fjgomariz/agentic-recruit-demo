@@ -63,7 +63,6 @@ jobs:
     environment: dev
     env:
       AZURE_ENV_NAME: dev
-      ALLOWED_IP_RANGES: ${{ vars.ALLOWED_IP_RANGES }}
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'swedencentral' }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -107,20 +106,6 @@ jobs:
           azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS true
           # The synthetic knowledge source data is copied from this exact commit by a job inside the virtual network.
           azd env set SEED_SOURCE_BASE_URL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/samples"
-
-          # The portals are reachable only from these public ranges. The ranges stay out of the repository: set the
-          # ALLOWED_IP_RANGES variable on the dev environment (comma-separated CIDR), or the rules already on the live portal are kept.
-          az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors
-          allowed_ranges="${ALLOWED_IP_RANGES:-}"
-          if [ -z "$allowed_ranges" ]; then
-            allowed_ranges="$(az containerapp show --resource-group "rg-recruitment-${AZURE_ENV_NAME}" --name "ca-recruitment-recruiter-${AZURE_ENV_NAME}" \
-              --query "properties.configuration.ingress.ipSecurityRestrictions[?action=='Allow' && name!='ci-smoke' && ipAddressRange!='192.0.2.1/32'].ipAddressRange" \
-              --output tsv 2>/dev/null | paste -sd, - || true)"
-          fi
-          if [ -z "$allowed_ranges" ]; then
-            echo "::warning::No allowed IP ranges: both portals will refuse all internet traffic. Set the ALLOWED_IP_RANGES variable on the dev environment."
-          fi
-          azd env set ALLOWED_IP_RANGES "$allowed_ranges"
           azd provision --no-prompt
 
       - name: Approve the Azure AI Search private link
@@ -181,38 +166,18 @@ jobs:
           api_url="$(azd env get-value API_URL)"
           public_url="$(azd env get-value PUBLIC_PORTAL_URL)"
           recruiter_url="$(azd env get-value RECRUITER_PORTAL_URL)"
-          resource_group="rg-recruitment-${AZURE_ENV_NAME}"
 
-          # This runner is not on the allow list, so both portals must refuse it. Rules can take a moment to apply.
           for portal_url in "$public_url" "$recruiter_url"; do
-            status=""
-            for attempt in $(seq 1 20); do
-              status="$(curl --silent --max-time 15 --output /dev/null --write-out '%{http_code}' "${portal_url}/" || true)"
-              [ "$status" = "403" ] && break
-              sleep 6
-            done
-            if [ "$status" != "403" ]; then
-              echo "::error::${portal_url} is open to the internet (got HTTP ${status})"
-              exit 1
-            fi
-            echo "${portal_url} refuses clients outside the allow list"
-          done
-
-          # Allow this runner temporarily (the cleanup step always removes the rule) and check the full path.
-          runner_ip="$(curl --silent --retry 5 https://api.ipify.org)"
-          for app in "ca-recruitment-public-${AZURE_ENV_NAME}" "ca-recruitment-recruiter-${AZURE_ENV_NAME}"; do
-            az containerapp ingress access-restriction set --resource-group "$resource_group" --name "$app" \
-              --rule-name ci-smoke --description "GitHub runner smoke test" --ip-address "${runner_ip}/32" --action Allow --output none
-          done
-          for portal_url in "$public_url" "$recruiter_url"; do
-            # The portal reaches the internal API, which reads Cosmos DB.
+            # Unauthenticated health path: the portal reaches the internal API, which reads Cosmos DB.
             curl --silent --show-error --fail-with-body --retry 30 --retry-all-errors --retry-delay 6 "${portal_url}/api/health"
             echo
-            status="$(curl --silent --output /dev/null --write-out '%{http_code}' "${portal_url}/")"
-            if [ "$status" != "200" ]; then
-              echo "::error::${portal_url}/ answered HTTP ${status}"
-              exit 1
-            fi
+            # Every other path must send a browser to Microsoft Entra sign-in (non-browser clients get 401).
+            result="$(curl --silent --output /dev/null --user-agent 'Mozilla/5.0' --header 'Accept: text/html' \
+              --write-out '%{http_code} %{redirect_url}' "${portal_url}/")"
+            case "$result" in
+              "302 https://login.microsoftonline.com/"*) echo "${portal_url} requires sign-in" ;;
+              *) echo "::error::${portal_url} is not protected by sign-in (got: ${result})"; exit 1 ;;
+            esac
           done
 
           # The API has internal ingress only: from the internet the environment answers 404 (or the name does not resolve).
@@ -227,19 +192,10 @@ jobs:
             echo "### Deployed ${GITHUB_SHA::7}"
             echo "| App | URL |"
             echo "| --- | --- |"
-            echo "| Public portal (IP allow list) | ${public_url} |"
-            echo "| Recruiter portal (IP allow list) | ${recruiter_url} |"
+            echo "| Public portal (sign-in required) | ${public_url} |"
+            echo "| Recruiter portal (sign-in required) | ${recruiter_url} |"
             echo "| API (internal only) | ${api_url} |"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove the temporary runner access rule
-        if: always()
-        run: |
-          az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors || true
-          for app in "ca-recruitment-public-${AZURE_ENV_NAME}" "ca-recruitment-recruiter-${AZURE_ENV_NAME}"; do
-            az containerapp ingress access-restriction remove --resource-group "rg-recruitment-${AZURE_ENV_NAME}" --name "$app" \
-              --rule-name ci-smoke --output none 2>/dev/null || true
-          done
 
       - name: Show Container Apps diagnostics
         if: failure()
