@@ -56,7 +56,7 @@ $token = az account get-access-token --scope "api://<client-id>/user_impersonati
 Invoke-WebRequest "$portalUrl/candidates" -Headers @{ Authorization = "Bearer $token" }
 ```
 
-The client ID is not a secret and is committed as the default of `AZURE_AUTH_CLIENT_ID` in `infra/main.parameters.json`; override it with `azd env set AZURE_AUTH_CLIENT_ID <id>` for another environment. To give someone access later, add them with `-AllowedUsers` or under **Enterprise applications → Users and groups** in the Entra admin center. To open the careers portal to anonymous candidates, remove `authClientId` from the `publicPortal` module in `infra/main.bicep`.
+The client ID is not a secret, but it is specific to a tenant, so it is not committed: store it as the `AZURE_AUTH_CLIENT_ID` variable of the GitHub `dev` environment and deploy again (locally: `azd env set AZURE_AUTH_CLIENT_ID <id>`). Until it is set the portals have no sign-in and the deployment prints a warning. To target a specific tenant run `./infra/scripts/setup-auth.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id>`; the script stops if you are signed in to another tenant. To give someone access later, add them with `-AllowedUsers` or under **Enterprise applications → Users and groups** in the Entra admin center. To open the careers portal to anonymous candidates, remove `authClientId` from the `publicPortal` module in `infra/main.bicep`.
 
 ## One-time GitHub configuration
 
@@ -68,6 +68,7 @@ Create a GitHub environment named `dev` with these environment variables (not se
 | `AZURE_TENANT_ID` | Microsoft Entra tenant ID. |
 | `AZURE_SUBSCRIPTION_ID` | Development Azure subscription ID. |
 | `AZURE_LOCATION` | Deployment region, for example `swedencentral`. |
+| `AZURE_AUTH_CLIENT_ID` | Client ID of the Entra app registration that protects the portals, printed by `infra/scripts/setup-auth.ps1`. Set it after the first deployment. |
 
 Configure a federated identity credential on the deployment identity for the GitHub `dev` environment:
 

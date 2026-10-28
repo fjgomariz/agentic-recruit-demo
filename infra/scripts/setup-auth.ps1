@@ -3,20 +3,26 @@
   Creates (or updates) the Microsoft Entra app registration that protects both portals.
 
 .DESCRIPTION
-  Run once per environment with an account that can create app registrations in the tenant
-  that hosts the subscription. The script is idempotent:
+  Run once per environment, after the portals exist, with an account that can create app registrations in the
+  tenant that hosts the subscription. It targets the tenant and subscription you select with -TenantId and
+  -SubscriptionId (default: the current Azure CLI context) and refuses to run in any other tenant.
+  The script is idempotent:
     - registers a single-tenant web app with the portals' /.auth/login/aad/callback redirect URIs
       and ID token issuance (Container Apps authentication signs users in without a client secret);
     - exposes a user_impersonation scope pre-authorized for the Azure CLI, so you can call the
       portals from scripts with `az account get-access-token`;
     - requires user assignment and assigns the given users, so nobody else in the tenant can sign in.
-  Put the printed client ID in infra/main.parameters.json (authClientId) or the AZURE_AUTH_CLIENT_ID azd variable.
+  It prints the client ID; store it as the AZURE_AUTH_CLIENT_ID variable of the GitHub environment (or
+  `azd env set AZURE_AUTH_CLIENT_ID <id>` locally) and deploy again so the portals use it. Nothing is committed.
 
 .EXAMPLE
+  ./infra/scripts/setup-auth.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id> -EnvironmentName dev
   ./infra/scripts/setup-auth.ps1 -EnvironmentName dev
   ./infra/scripts/setup-auth.ps1 -EnvironmentName dev -AllowedUsers alice@contoso.com,bob@contoso.com
 #>
 param(
+  [string] $TenantId = '',
+  [string] $SubscriptionId = '',
   [string] $EnvironmentName = 'dev',
   [string[]] $AllowedUsers = @(),
   [string] $DisplayName = ''
@@ -38,6 +44,13 @@ function Invoke-Graph([string] $Method, [string] $Url, $Body) {
     if ($output) { return $output | ConvertFrom-Json }
   } finally { Remove-Item $file -ErrorAction SilentlyContinue }
 }
+
+if ($SubscriptionId) { az account set --subscription $SubscriptionId }
+$context = az account show --output json | ConvertFrom-Json
+if ($TenantId -and $context.tenantId -ne $TenantId) {
+  throw "Signed in to tenant $($context.tenantId), expected $TenantId. Run: az login --tenant $TenantId"
+}
+Write-Host "Tenant $($context.tenantId), subscription $($context.name) ($($context.id))"
 
 $resourceGroup = "rg-recruitment-$EnvironmentName"
 $redirectUris = foreach ($app in "ca-recruitment-public-$EnvironmentName", "ca-recruitment-recruiter-$EnvironmentName") {
@@ -98,5 +111,7 @@ foreach ($principalId in $principals) {
 
 Write-Host ''
 Write-Host "Client ID: $appId"
+Write-Host 'Next: set it as AZURE_AUTH_CLIENT_ID on the GitHub environment and run the deployment again:'
+Write-Host "  gh variable set AZURE_AUTH_CLIENT_ID --env $EnvironmentName --body $appId"
 Write-Host "Redirect URIs: $($redirectUris -join ', ')"
 Write-Host "Allowed users: $((Invoke-Graph GET "$graph/servicePrincipals/$servicePrincipalId/appRoleAssignedTo").value.principalDisplayName -join ', ')"

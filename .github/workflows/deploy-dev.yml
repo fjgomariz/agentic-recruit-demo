@@ -67,6 +67,8 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      # Client ID of the Entra app registration created by infra/scripts/setup-auth.ps1. Empty until that script has run.
+      AZURE_AUTH_CLIENT_ID: ${{ vars.AZURE_AUTH_CLIENT_ID }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -101,6 +103,7 @@ jobs:
           principal_id="$(az account get-access-token --query accessToken --output tsv \
             | python3 -c 'import base64, json, sys; p = sys.stdin.read().split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["oid"])')"
           azd env set AZURE_PRINCIPAL_ID "$principal_id"
+          azd env set AZURE_AUTH_CLIENT_ID "${AZURE_AUTH_CLIENT_ID:-}"
           # The dev Foundry account already exists. Deploy child resources without
           # rewriting the account, which also isolates account-level policy failures.
           azd env set AZURE_FOUNDRY_ACCOUNT_EXISTS true
@@ -172,6 +175,10 @@ jobs:
             curl --silent --show-error --fail-with-body --retry 30 --retry-all-errors --retry-delay 6 "${portal_url}/api/health"
             echo
             # Every other path must send a browser to Microsoft Entra sign-in (non-browser clients get 401).
+            if [ -z "${AZURE_AUTH_CLIENT_ID:-}" ]; then
+              echo "::warning::AZURE_AUTH_CLIENT_ID is not set: ${portal_url} has no sign-in yet. Run infra/scripts/setup-auth.ps1 and set the variable."
+              continue
+            fi
             result="$(curl --silent --output /dev/null --user-agent 'Mozilla/5.0' --header 'Accept: text/html' \
               --write-out '%{http_code} %{redirect_url}' "${portal_url}/")"
             case "$result" in
