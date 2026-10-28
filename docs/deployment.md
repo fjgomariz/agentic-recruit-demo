@@ -1,6 +1,50 @@
 # Continuous deployment
 
-Every pull request validates infrastructure and applications. Every push to `main` publishes commit-tagged container images to GitHub Container Registry and runs a single `azd provision` that deploys the Azure foundation **and** the three Container Apps with those images. Bicep is the only source of truth for the apps: there is no imperative `az containerapp update` step and nothing has to be created by hand.
+Every pull request validates infrastructure and applications. Every push to `main` publishes commit-tagged container images to GitHub Container Registry and runs a single `azd provision` that deploys the Azure foundation **and** the three Container Apps with those images. Bicep is the only source of truth for the apps: there is no imperative `az containerapp update` step and no app is created by hand. A one-time [bootstrap script](#deploy-your-own-copy) prepares the subscription and the GitHub environment.
+
+## Deploy your own copy
+
+This takes about 30 minutes including setup, most of it waiting for Azure. Everything is deployed from GitHub Actions into your own subscription; nothing in the repository is tied to the original author's tenant.
+
+### What you need
+
+| Need | Details |
+| --- | --- |
+| Azure subscription | Where you can create resource groups and **assign roles** (Owner, or Contributor plus User Access Administrator). A demo or lab subscription is best: see [Cost](#cost). |
+| Microsoft Entra tenant | The one that hosts the subscription. You need permission to register applications (members can by default). Use a lab or demo tenant: in a Microsoft corporate tenant the app registration is flagged by the Secure Future Initiative MISE compliance check (see [Access](#access-and-sign-in)). |
+| Model quota | In the region you deploy to (default `swedencentral`): GlobalStandard **gpt-5.4** 200K TPM, **gpt-5.4-mini** 50K, **gpt-5.6-sol** 10K and **text-embedding-3-large** 50K. The bootstrap script checks this. |
+| Azure AI Search capacity | Basic tier in France Central by default (`searchLocation` in `infra/main.bicep`). New services can fail with `InsufficientResourcesAvailable` in busy regions; pick another region that supports agentic retrieval. |
+| GitHub | Your own fork or copy of the repository, with **admin** rights, and Actions enabled (forks start with workflows disabled). |
+| Tools | [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), [GitHub CLI](https://cli.github.com), [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`, also on macOS and Linux) and Git. The Azure Developer CLI (`azd`) is only needed for local deployments. |
+
+### Steps
+
+1. **Fork and clone.** `gh repo fork <owner>/agentic-recruit-demo --clone`, then open the **Actions** tab of your fork and enable workflows.
+2. **Sign in** to the tenant you deploy to and to GitHub:
+
+   ```powershell
+   az login --tenant <tenant-id>
+   gh auth login
+   ```
+
+3. **Prepare Azure and GitHub** with the bootstrap script. It registers resource providers, checks model quota, creates the deployment identity with its federated credentials and the least-privilege role assignments, and creates the GitHub `dev` environment with its variables. It is idempotent; add `-Check` to preview without changing anything.
+
+   ```powershell
+   ./infra/scripts/bootstrap.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id> -Location swedencentral
+   ```
+
+4. **Run the deployment** from the Actions tab (**Deploy development** → **Run workflow**) or with `gh workflow run deploy-dev.yml`. The three images are built first (about 2 minutes). **While the deploy job is still provisioning (about 14 minutes, and the apps are among the last resources it creates), make the three container packages public** (GitHub creates them as private, and Container Apps pulls them anonymously): open each package's settings, **Change visibility**, **Public**. The bootstrap script prints the links. If you miss the window, make them public and re-run the failed jobs. The whole run takes about 20 minutes.
+5. **Add sign-in.** Until this step the portals have **no sign-in** and are reachable by anyone who knows the URL (the data is synthetic, but the portals call your models). Create the Entra app registration, store its client ID as the `AZURE_AUTH_CLIENT_ID` variable of the `dev` environment, and run the workflow again:
+
+   ```powershell
+   ./infra/scripts/setup-auth.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id> -EnvironmentName dev
+   gh variable set AZURE_AUTH_CLIENT_ID --env dev --body <client-id>
+   gh workflow run deploy-dev.yml
+   ```
+
+6. **Open the demo.** The workflow summary lists the URLs of the two portals. Sign in with the account you assigned in step 5, then follow [samples/applicants](../samples/applicants/README.md) to create jobs and apply with synthetic resumes.
+
+When a deployment fails, see [Troubleshooting](#troubleshooting). To delete everything, see [Tear down](#tear-down).
 
 ## Workflows
 
@@ -36,7 +80,11 @@ The Cosmos DB `jobs` container is provisioned by Bicep. Entra ID data-plane role
 
 ## Access and sign-in
 
-The demo is not public. Both portals use Container Apps built-in authentication with a single-tenant Microsoft Entra app registration (`Recruitment Foundry Demo (<env>)`) in the subscription's tenant:
+> **Until `AZURE_AUTH_CLIENT_ID` is set, the portals have no sign-in.** The deployment prints a warning instead of failing, so the first deployment can complete before the app registration exists. Do not leave a deployment in that state.
+>
+> **Microsoft corporate tenants:** Container Apps built-in authentication does not report a supported MISE version, so the Entra app registration it needs is flagged by the S360 MISE compliance KPI and scheduled for deletion. Deploy in a lab or demo tenant instead.
+
+The demo is meant to be private. Both portals use Container Apps built-in authentication with a single-tenant Microsoft Entra app registration (`Recruitment Foundry Demo (<env>)`) in the subscription's tenant:
 
 - **User assignment is required**, so only users assigned to the app can sign in; everyone else in the tenant is refused by Microsoft Entra ID.
 - There is **no client secret**: the platform signs users in with the OpenID Connect ID token flow, so nothing has to be stored or rotated.
@@ -58,46 +106,57 @@ Invoke-WebRequest "$portalUrl/candidates" -Headers @{ Authorization = "Bearer $t
 
 The client ID is not a secret, but it is specific to a tenant, so it is not committed: store it as the `AZURE_AUTH_CLIENT_ID` variable of the GitHub `dev` environment and deploy again (locally: `azd env set AZURE_AUTH_CLIENT_ID <id>`). Until it is set the portals have no sign-in and the deployment prints a warning. To target a specific tenant run `./infra/scripts/setup-auth.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id>`; the script stops if you are signed in to another tenant. To give someone access later, add them with `-AllowedUsers` or under **Enterprise applications → Users and groups** in the Entra admin center. To open the careers portal to anonymous candidates, remove `authClientId` from the `publicPortal` module in `infra/main.bicep`.
 
-## One-time GitHub configuration
+## GitHub environment and deployment identity
 
-Create a GitHub environment named `dev` with these environment variables (not secrets):
+[`infra/scripts/bootstrap.ps1`](../infra/scripts/bootstrap.ps1) creates all of this for you; this section documents what it sets up, for review or for doing it by hand.
+
+The GitHub environment `dev` has these variables (not secrets; no client secret is used anywhere):
 
 | Variable | Purpose |
 | --- | --- |
-| `AZURE_CLIENT_ID` | Client ID of the deployment identity. |
+| `AZURE_CLIENT_ID` | Client ID of the deployment identity (`recruitment-deployment-mi`). |
 | `AZURE_TENANT_ID` | Microsoft Entra tenant ID. |
-| `AZURE_SUBSCRIPTION_ID` | Development Azure subscription ID. |
-| `AZURE_LOCATION` | Deployment region, for example `swedencentral`. |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID. |
+| `AZURE_LOCATION` | Deployment region, for example `swedencentral` (defaults to that). |
 | `AZURE_AUTH_CLIENT_ID` | Client ID of the Entra app registration that protects the portals, printed by `infra/scripts/setup-auth.ps1`. Set it after the first deployment. |
+| `AZURE_FOUNDRY_ACCOUNT_EXISTS` | Optional. `true` deploys only the project, model deployments and connections into an existing Foundry account, for tenants whose policy blocks creating or updating the account itself (see [Troubleshooting](#troubleshooting)). |
 
-Configure a federated identity credential on the deployment identity for the GitHub `dev` environment:
+The deployment identity is a user-assigned managed identity with a federated credential per GitHub subject. GitHub issues either a name-based subject (`repo:<owner>/<repo>:environment:dev`) or an ID-based one (`repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:dev`) depending on the repository, so the script creates both.
 
-```text
-repo:<owner>/<repository>:environment:dev
-```
+It needs:
 
-The deployment identity needs:
+- **Contributor** on the subscription (the template creates the environment resource group).
+- **Role Based Access Control Administrator** on the environment resource group (`rg-recruitment-<env>`), with a condition that only allows assigning or removing the seven roles the template grants:
 
-- **Contributor** on the subscription (the template creates the resource group).
-- **Role Based Access Control Administrator** on the resource group, with a condition that only allows assigning or removing **Foundry User** (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) and **Storage Blob Data Contributor** (`ba92f5b4-2d11-453d-a403-e96b0029c9fe`). Bicep grants **Foundry User** on the Foundry project to the API identity (to run agents) and to the deployment identity (to publish them), and **Storage Blob Data Contributor** on the `resumes` container to the API identity.
+  | Role | Granted by Bicep to |
+  | --- | --- |
+  | Foundry User (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) | the API identity and the deployment identity, on the Foundry project |
+  | Storage Blob Data Contributor (`ba92f5b4-2d11-453d-a403-e96b0029c9fe`) | the API identity (the seed job runs as it), on the resumes, talent pool and hiring policies containers |
+  | Storage Blob Data Reader (`2a2b9908-6ea1-4ae2-8e65-a410df84e7d1`) | the Search service, on the knowledge source containers |
+  | Cognitive Services User (`a97b65f3-24c7-4388-baec-2e87135dc908`) | the Search service, on the Foundry account (embeddings and query planning) |
+  | Search Service Contributor (`7ca78c08-252a-4471-8644-bb5ff32d4ba0`) | the deployment identity, to create the knowledge sources and knowledge base |
+  | Search Index Data Contributor (`8ebe5a00-799e-43f5-93ac-243d3dce84a7`) | the deployment identity |
+  | Search Index Data Reader (`1407120a-92aa-4202-b7e9-c0e197c71c8f`) | the API identity (retrieval activity log) and the Foundry project identity (calls the knowledge base from the agent) |
 
-Cosmos DB SQL role assignments are Cosmos resources and need no `Microsoft.Authorization` permission. No client secret is used.
+Cosmos DB SQL role assignments are Cosmos resources and need no `Microsoft.Authorization` permission. To create the role assignment by hand, build the condition from the seven role IDs:
 
 ```powershell
-$roles = '53ca6127-db72-4b80-b1b0-d745d6d5456d, ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+$roles = '53ca6127-db72-4b80-b1b0-d745d6d5456d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 2a2b9908-6ea1-4ae2-8e65-a410df84e7d1, a97b65f3-24c7-4388-baec-2e87135dc908, 7ca78c08-252a-4471-8644-bb5ff32d4ba0, 8ebe5a00-799e-43f5-93ac-243d3dce84a7, 1407120a-92aa-4202-b7e9-c0e197c71c8f'
 $condition = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$roles}))"
 az role assignment create --assignee-object-id <deployment-identity-object-id> --assignee-principal-type ServicePrincipal `
   --role "Role Based Access Control Administrator" --scope /subscriptions/<id>/resourceGroups/rg-recruitment-dev `
   --condition $condition --condition-version 2.0
 ```
 
-Images are published with the repository-scoped `GITHUB_TOKEN`. Keep the three GHCR packages public so Container Apps can pull them without registry credentials:
+Images are published with the repository-scoped `GITHUB_TOKEN`. The three GHCR packages must be **public** so Container Apps can pull them without registry credentials:
 
 - `recruitment-foundry-public-portal`
 - `recruitment-foundry-recruiter-portal`
 - `recruitment-foundry-api`
 
 ## Run a deployment locally
+
+This needs the container images from your fork's workflow (they are published to `ghcr.io/<owner>/`). Without image tags, `azd provision` deploys only the shared foundation. Run `bootstrap.ps1` first if you also want the workflow to work.
 
 ```powershell
 azd env new dev --subscription <subscription-id> --location swedencentral
@@ -117,6 +176,47 @@ az containerapp logs show -g rg-recruitment-dev -n ca-recruitment-api-dev --type
 ```
 
 Local templates are committed beside each application as `.env.example` or `.env.local.example`. Keep real `.env` files untracked.
+
+## Cost
+
+The environment is built to run all the time, so it costs money while it exists, whether or not anyone uses it. Rough monthly list prices in USD (October 2026, no discounts); use the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your region and agreement:
+
+| Item | Estimate |
+| --- | --- |
+| Azure AI Search, Basic tier (fixed, billed per hour) | about $74 (0.101 USD per hour) |
+| Three Container Apps, 0.5 vCPU and 1 GiB each, one replica always on | about $12 each when idle and up to about $39 each when busy, before the monthly free grant |
+| Two private endpoints, private DNS, Log Analytics and Application Insights, Storage, serverless Cosmos DB | about $15 to $30 in total with light use |
+| Model usage (gpt-5.4, gpt-5.4-mini, embeddings) | pay per token: cents for a demo session, more if you run the evaluations repeatedly |
+
+Expect roughly **$125 to $200 a month** while it is left running. If you do not need it for a while, [tear it down](#tear-down) and deploy again later: a deployment takes about 20 minutes.
+
+## Tear down
+
+The deployment runs in GitHub Actions, so there is no local `azd` state and `azd down` does not apply. Delete the resource group, purge the soft-deleted Foundry account (its name is deterministic, so a redeployment would otherwise collide), and remove the app registration:
+
+```powershell
+$account = az cognitiveservices account list -g rg-recruitment-dev --query "[0].name" -o tsv
+az group delete -n rg-recruitment-dev --yes
+az cognitiveservices account purge --location swedencentral --resource-group rg-recruitment-dev --name $account
+az ad app delete --id <AZURE_AUTH_CLIENT_ID>
+```
+
+To deploy again, run `./infra/scripts/bootstrap.ps1` once more: it recreates the resource group and the role assignment that lived on it (the deployment identity is in `rg-recruitment-ci` and survives). To remove the identity too, delete `rg-recruitment-ci` and the GitHub `dev` environment.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `AADSTS700213: No matching federated identity record` when signing in to Azure | The workflow's GitHub subject does not match a federated credential (for example after renaming or transferring the repository). Run `bootstrap.ps1` again: it creates both subject formats. |
+| `AuthorizationFailed` on `Microsoft.Authorization/roleAssignments/write` | The deployment identity's role condition does not list every role the template assigns. Run `bootstrap.ps1` again: it replaces a stale condition. |
+| `MissingSubscriptionRegistration` or `NoRegisteredProviderFound` | A resource provider is not registered. Run `bootstrap.ps1` again; it registers them and waits. |
+| Container app stuck provisioning, then failing with an image pull error (`UNAUTHORIZED`, `manifest unknown`) | The container packages are still private. Make the three packages public (see [GitHub environment](#github-environment-and-deployment-identity)) and re-run the failed jobs. |
+| `InsufficientQuota` or a model deployment that stays in `Creating` | Not enough GlobalStandard quota in the region. Request quota, pick another region, or lower the `capacity` values in `agentModelDeployments` in `infra/main.bicep`. |
+| `InsufficientResourcesAvailable` creating the Search service | No Basic Search capacity in the region. Set `searchLocation` in `infra/main.bicep` to another region that supports agentic retrieval and semantic ranker. |
+| `RequestDisallowedByPolicy` creating or updating the Foundry account | A tenant policy blocks the account. Create the account yourself with the expected name (`aif-recruitment-<env>-<suffix>`, see the `AZURE_AI_ACCOUNT_NAME` output) and set `AZURE_FOUNDRY_ACCOUNT_EXISTS` to `true`: the template then adds only the project, model deployments and connections. |
+| Storage or Cosmos reports public network access disabled when you try it from your machine | By design: both are private-endpoint only. Use the deployed apps, or a VPN into the virtual network. |
+| The smoke test warns `AZURE_AUTH_CLIENT_ID is not set` | The portals have no sign-in yet. Do step 5 of [Deploy your own copy](#deploy-your-own-copy). |
+| Search or knowledge base calls fail in the first minutes | Role assignments can take several minutes to apply. The workflow retries; re-run it if it still fails. |
 
 ## Branch protection
 

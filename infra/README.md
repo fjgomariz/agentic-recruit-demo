@@ -10,8 +10,11 @@ Internet
     └── External workload-profiles Container Apps environment
         ├── Internal-only ingress: API (8000), called by the portals' servers
         └── Dedicated VNet integration subnet (/23)
-            ├── Blob private endpoint → Storage account
+            ├── Blob private endpoint → Storage account (resumes, talent pool, hiring policies)
             └── Cosmos SQL private endpoint → Cosmos DB for NoSQL
+
+Azure AI Search (Foundry IQ, dev only) → shared private link → Storage account
+Microsoft Foundry account and project → model deployments and the prompt agents
 ```
 
 The VNet also contains a separate private-endpoints subnet. Private DNS zones for Blob Storage and Cosmos DB are linked to the VNet, so workloads use the normal service hostnames while data traffic resolves to private endpoint IP addresses. The three Container Apps are deployed by the same template when the `apiImage`, `publicPortalImage`, and `recruiterPortalImage` parameters are set; see [docs/deployment.md](../docs/deployment.md).
@@ -32,7 +35,9 @@ The Container Apps environment remains externally accessible and has public netw
 | Container Apps environment | External workload-profiles environment integrated with the dedicated subnet. Environment logs flow to Log Analytics. |
 | API identity | User-assigned managed identity used by the API, granted Cosmos DB Built-in Data Contributor on the account, Storage Blob Data Contributor on the `resumes` container, and Foundry User on the Foundry project. |
 | Foundry account and project | AI Services account (`aif-…`, keys disabled) with the `proj-recruitment-<env>` project that hosts the prompt agents in `agents/`. The deployment identity gets Foundry User on the project to publish agent versions. |
-| Model deployments | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM) for the job description writer and the candidate evaluator, and `gpt-5.4` (version `2026-03-05`, GlobalStandard, 500K TPM) for the evaluation reviewer. Declared in `agentModelDeployments`, created one at a time, and pinned with auto-upgrade disabled. |
+| Model deployments | `gpt-5.4-mini` (version `2026-03-17`, GlobalStandard, 50K TPM) for the job description writer, the candidate evaluator and the recruiter copilot, and `gpt-5.4` (version `2026-03-05`, GlobalStandard, 200K TPM) for the evaluation reviewer. Declared in `agentModelDeployments`, created one at a time, and pinned with auto-upgrade disabled. In `dev` only, `gpt-5.6-sol` (10K) for model comparisons and `text-embedding-3-large` (50K) for Foundry IQ. |
+| Azure AI Search (dev only) | Basic service in `searchLocation` (France Central by default), Entra-only, with a shared private link to Storage. The knowledge sources `talent-pool-ks` and `hiring-policies-ks` and the knowledge base `recruiting-iq` are created by `agents/knowledge/setup_knowledge.py` after provisioning. |
+| Seed job (dev only) | A manual Container Apps job inside the virtual network that copies the synthetic talent pool and hiring policies from the pinned commit of the public repository into the private Storage containers. The deployment workflow starts it. |
 | Application Insights connection | Project connection that enables Foundry server-side agent tracing into the shared Application Insights resource. |
 | Container Apps | API and both portals, each with ingress, probes, and `PORT` derived from one target-port value. The API ingress is internal; the portals use built-in Microsoft Entra authentication (`authConfigs`) when `authClientId` is set. Deployed only when image parameters are supplied. |
 
@@ -40,30 +45,36 @@ The Container Apps environment remains externally accessible and has public netw
 
 ```text
 infra/
-├── main.bicep
-├── main.parameters.json
+├── main.bicep                       # subscription-scope entry point
+├── main.parameters.json             # azd parameter mapping
 ├── modules/
-│   ├── blob-container-access.bicep
-│   ├── container-app.bicep
+│   ├── blob-container-access.bicep      # per-container Blob roles
+│   ├── container-app.bicep              # one app: ingress, probes, optional Entra authentication
 │   ├── container-apps-environment.bicep
-│   ├── cosmos-data-access.bicep
-│   ├── cosmos.bicep
-│   ├── foundry-project-role.bicep
-│   ├── foundry.bicep
-│   ├── monitoring.bicep
-│   ├── network.bicep
-│   ├── private-dns-zone.bicep
-│   ├── private-endpoint.bicep
+│   ├── cosmos.bicep, cosmos-data-access.bicep
+│   ├── foundry.bicep, foundry-existing.bicep   # create the account, or add to an existing one
+│   ├── foundry-account-role.bicep, foundry-project-role.bicep, foundry-knowledge-connection.bicep
+│   ├── monitoring.bicep                 # Log Analytics and Application Insights
+│   ├── network.bicep, private-endpoint.bicep, private-dns-zone.bicep
+│   ├── search.bicep, search-role.bicep, storage-blob-reader.bicep   # Foundry IQ (dev only)
+│   ├── seed-job.bicep                   # copies the synthetic knowledge data (dev only)
 │   ├── storage.bicep
 │   └── user-assigned-identity.bicep
 ├── parameters/
 │   └── dev.bicepparam
-├── scripts/
-│   └── validate-networking.sh
-└── README.md
+└── scripts/
+    ├── bootstrap.ps1                    # prepares the subscription and the GitHub environment
+    ├── setup-auth.ps1                   # creates the Entra app registration for sign-in
+    ├── approve-search-private-link.sh   # approves the Search shared private link
+    ├── seed-knowledge.py                # runs inside the seed job
+    └── validate-networking.sh
 ```
 
 Resource API versions are pinned to stable provider versions available as of September 2026. Preview API versions are not used.
+
+## Deploy
+
+For a full copy of the demo (images, Foundry agents, knowledge base, sign-in), follow [Deploy your own copy](../docs/deployment.md#deploy-your-own-copy): it uses `scripts/bootstrap.ps1` and the GitHub workflow. The commands below deploy only the Azure foundation by hand.
 
 ## Deploy with Azure Developer CLI
 
@@ -129,5 +140,4 @@ The API uses the user-assigned identity `id-recruitment-api-<env>` with Cosmos D
 - Add explicit retention policies for resumes and other generated documents.
 - Revisit the temporary `/id` jobs partition key when production access patterns are finalized.
 - Add diagnostic settings, alerts, dashboards, and availability tests as workloads appear.
-- Add Azure AI Foundry resources, model deployments, and agent tracing after model and regional capacity requirements are known.
 - Add deployment-stage parameters for retention, redundancy, scaling, and network controls when production environments are introduced.
