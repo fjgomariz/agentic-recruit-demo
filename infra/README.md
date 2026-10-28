@@ -4,6 +4,8 @@ This folder contains the Azure Developer CLI (`azd`) and modular Bicep foundatio
 
 ## Architecture
 
+A picture of the whole system, including the agents and the deployment path, is in [docs/diagrams/architecture.svg](../docs/diagrams/architecture.svg). The infrastructure alone:
+
 ```text
 Internet
 └── HTTPS ingress with Microsoft Entra sign-in: public portal (3000), recruiter portal (3000)

@@ -15,6 +15,12 @@ The platform should make the following Azure AI Foundry capabilities visible and
 - Model, token, latency, and cost analysis.
 - Comparison of agent and model configurations using scenario-specific evidence.
 
+## System overview
+
+![Architecture: two portals and an API on Azure Container Apps, four Foundry agents, Foundry IQ on Azure AI Search, Cosmos DB and Blob Storage behind private endpoints, deployed from GitHub Actions](diagrams/architecture.svg)
+
+The picture shows what is deployed today. Numbers on the arrows follow one candidate: 1 applies, 2 the evaluator scores the resume, 3 the reviewer checks it, 4 the recruiter decides. 5 is the separate talent pool search by the recruiter copilot. The diagram is editable: open [`architecture.excalidraw`](diagrams/architecture.excalidraw) in any Excalidraw editor, change it, and export it again as SVG and PNG next to it.
+
 ## Architecture Goals
 
 1. **Tell a clear end-to-end story.** A user should be able to follow a request from either portal through agent execution, data access, evaluation, and operational telemetry.

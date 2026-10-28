@@ -31,6 +31,12 @@ The demo deploys into your own Azure subscription from GitHub Actions, in about 
 
 You need an Azure subscription where you can assign roles, model quota for the gpt-5.4 family, and a lab or demo tenant (not a Microsoft corporate tenant). Expect roughly **$125 to $200 a month** while it is deployed; see [Cost and tear down](docs/deployment.md#cost) before you start. The full guide, with prerequisites and troubleshooting, is [docs/deployment.md](docs/deployment.md).
 
+## Architecture at a glance
+
+[![Architecture: two portals and an API on Azure Container Apps, four Foundry agents, Foundry IQ on Azure AI Search, Cosmos DB and Blob Storage behind private endpoints, deployed from GitHub Actions](docs/diagrams/architecture.svg)](docs/diagrams/architecture.svg)
+
+Numbers on the arrows follow one candidate: 1 applies, 2 the evaluator scores the resume, 3 the reviewer checks it, 4 the recruiter decides. 5 is the separate talent pool search by the recruiter copilot.
+
 ## Architecture Vision
 
 The application is organized around two human experiences and a coordinated agent layer:
